@@ -48,20 +48,23 @@ DBReader::DBReader(const std::string & databasePath,
 				   bool ignoreGoalDelay,
 				   bool goalsIgnored,
 				   int startIndex,
-				   int cameraIndex) :
+				   int cameraIndex,
+				   int maxFrames) :
 	Camera(frameRate),
 	_paths(uSplit(databasePath, ';')),
 	_odometryIgnored(odometryIgnored),
 	_ignoreGoalDelay(ignoreGoalDelay),
 	_goalsIgnored(goalsIgnored),
 	_startIndex(startIndex),
+	_maxFrames(maxFrames),
 	_cameraIndex(cameraIndex),
 	_dbDriver(0),
 	_currentId(_ids.end()),
 	_previousMapId(-1),
 	_previousStamp(0),
 	_previousMapID(0),
-	_calibrated(false)
+	_calibrated(false),
+	_framesPublished(0)
 {
 }
 
@@ -71,20 +74,23 @@ DBReader::DBReader(const std::list<std::string> & databasePaths,
 				   bool ignoreGoalDelay,
 				   bool goalsIgnored,
 				   int startIndex,
-				   int cameraIndex) :
+				   int cameraIndex,
+				   int maxFrames) :
 	Camera(frameRate),
    _paths(databasePaths),
 	_odometryIgnored(odometryIgnored),
 	_ignoreGoalDelay(ignoreGoalDelay),
 	_goalsIgnored(goalsIgnored),
 	_startIndex(startIndex),
+	_maxFrames(maxFrames),
 	_cameraIndex(cameraIndex),
 	_dbDriver(0),
 	_currentId(_ids.end()),
 	_previousMapId(-1),
 	_previousStamp(0),
 	_previousMapID(0),
-	_calibrated(false)
+	_calibrated(false),
+	_framesPublished(0)
 {
 }
 
@@ -114,6 +120,7 @@ bool DBReader::init(
 	_previousStamp = 0;
 	_previousMapID = 0;
 	_calibrated = false;
+	_framesPublished = 0;
 
 	if(_paths.size() == 0)
 	{
@@ -212,6 +219,12 @@ std::string DBReader::getSerial() const
 
 SensorData DBReader::captureImage(CameraInfo * info)
 {
+	if(_maxFrames>0 && ++_framesPublished > _maxFrames)
+	{
+		UINFO("Maximum frames (%d) reached!", _maxFrames);
+		return SensorData();
+	}
+
 	SensorData data = this->getNextData(info);
 	if(data.id() == 0)
 	{
@@ -231,6 +244,7 @@ SensorData DBReader::captureImage(CameraInfo * info)
 			}
 		}
 	}
+
 	if(data.id())
 	{
 		std::string goalId;
@@ -330,7 +344,7 @@ SensorData DBReader::getNextData(CameraInfo * info)
 			Transform globalPose;
 			cv::Mat globalPoseCov;
 
-			std::map<int, Link> priorLinks;
+			std::multimap<int, Link> priorLinks;
 			_dbDriver->loadLinks(*_currentId, priorLinks, Link::kPosePrior);
 			if( priorLinks.size() &&
 				!priorLinks.begin()->second.transform().isNull() &&
@@ -339,12 +353,31 @@ SensorData DBReader::getNextData(CameraInfo * info)
 			{
 				globalPose = priorLinks.begin()->second.transform();
 				globalPoseCov = priorLinks.begin()->second.infMatrix().inv();
+				if(data.gps().stamp() != 0.0 &&
+						globalPoseCov.at<double>(3,3)>=9999 &&
+						globalPoseCov.at<double>(4,4)>=9999 &&
+						globalPoseCov.at<double>(5,5)>=9999)
+				{
+					// clear global pose as GPS was used for prior
+					globalPose.setNull();
+				}
+			}
+
+			Transform gravityTransform;
+			std::multimap<int, Link> gravityLinks;
+			_dbDriver->loadLinks(*_currentId, gravityLinks, Link::kGravity);
+			if( gravityLinks.size() &&
+				!gravityLinks.begin()->second.transform().isNull() &&
+				gravityLinks.begin()->second.infMatrix().cols == 6 &&
+				gravityLinks.begin()->second.infMatrix().rows == 6)
+			{
+				gravityTransform = gravityLinks.begin()->second.transform();
 			}
 
 			cv::Mat infMatrix = cv::Mat::eye(6,6,CV_64FC1);
 			if(!_odometryIgnored)
 			{
-				std::map<int, Link> links;
+				std::multimap<int, Link> links;
 				_dbDriver->loadLinks(*_currentId, links, Link::kNeighbor);
 				if(links.size() && links.begin()->first < *_currentId)
 				{
@@ -423,24 +456,23 @@ SensorData DBReader::getNextData(CameraInfo * info)
 				{
 					// select one camera
 					int subImageWidth = data.imageRaw().cols/data.cameraModels().size();
+					cv::Mat image;
 					UASSERT(!data.imageRaw().empty() &&
 							data.imageRaw().cols % data.cameraModels().size() == 0 &&
 							_cameraIndex*subImageWidth < data.imageRaw().cols);
-					data.setImageRaw(
-							cv::Mat(data.imageRaw(),
-							cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.imageRaw().rows)).clone());
+					image= cv::Mat(data.imageRaw(),
+						   cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.imageRaw().rows)).clone();
 
+					cv::Mat depth;
 					if(!data.depthOrRightRaw().empty())
 					{
 						UASSERT(data.depthOrRightRaw().cols % data.cameraModels().size() == 0 &&
 								subImageWidth == data.depthOrRightRaw().cols/(int)data.cameraModels().size() &&
 								_cameraIndex*subImageWidth < data.depthOrRightRaw().cols);
-						data.setDepthOrRightRaw(
-								cv::Mat(data.depthOrRightRaw(),
-								cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.depthOrRightRaw().rows)).clone());
+						depth = cv::Mat(data.depthOrRightRaw(),
+							    cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.depthOrRightRaw().rows)).clone();
 					}
-					CameraModel model = data.cameraModels().at(_cameraIndex);
-					data.setCameraModel(model);
+					data.setRGBDImage(image, depth, data.cameraModels().at(_cameraIndex));
 				}
 				else
 				{
@@ -454,13 +486,25 @@ SensorData DBReader::getNextData(CameraInfo * info)
 			{
 				data.setGlobalPose(globalPose, globalPoseCov);
 			}
+			if(!gravityTransform.isNull())
+			{
+				Eigen::Quaterniond q = gravityTransform.getQuaterniond();
+				data.setIMU(IMU(
+						cv::Vec4d(q.x(), q.y(), q.z(), q.w()), cv::Mat::eye(3,3,CV_64FC1),
+						cv::Vec3d(), cv::Mat(),
+						cv::Vec3d(), cv::Mat(),
+						Transform::getIdentity())); // we assume that gravity links are already transformed in base_link
+			}
 
-			UDEBUG("Laser=%d RGB/Left=%d Depth/Right=%d, Grid=%d, UserData=%d",
+			UDEBUG("Laser=%d RGB/Left=%d Depth/Right=%d, Grid=%d, UserData=%d, GlobalPose=%d, GPS=%d, IMU=%d",
 					data.laserScanRaw().isEmpty()?0:1,
 					data.imageRaw().empty()?0:1,
 					data.depthOrRightRaw().empty()?0:1,
 					data.gridCellSize()==0.0f?0:1,
-					data.userDataRaw().empty()?0:1);
+					data.userDataRaw().empty()?0:1,
+					globalPose.isNull()?0:1,
+					data.gps().stamp()!=0.0?1:0,
+					gravityTransform.isNull()?0:1);
 
 			cv::Mat descriptors;
 			if(!s->getWordsDescriptors().empty())

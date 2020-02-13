@@ -62,20 +62,20 @@ public:
 		kTypeTORO = 0,
 		kTypeG2O = 1,
 		kTypeGTSAM = 2,
-		kTypeCVSBA = 3
+		kTypeCeres = 3,
+		kTypeCVSBA = 4
 	};
 	static bool isAvailable(Optimizer::Type type);
 	static Optimizer * create(const ParametersMap & parameters);
 	static Optimizer * create(Optimizer::Type type, const ParametersMap & parameters = ParametersMap());
 
 	// Get connected poses and constraints from a set of links
-	static void getConnectedGraph(
+	void getConnectedGraph(
 			int fromId,
 			const std::map<int, Transform> & posesIn,
-			const std::multimap<int, Link> & linksIn, // only one link between two poses
+			const std::multimap<int, Link> & linksIn,
 			std::map<int, Transform> & posesOut,
-			std::multimap<int, Link> & linksOut,
-			int depth = 0);
+			std::multimap<int, Link> & linksOut) const;
 
 public:
 	virtual ~Optimizer() {}
@@ -90,6 +90,7 @@ public:
 	bool isRobust() const {return robust_;}
 	bool priorsIgnored() const {return priorsIgnored_;}
 	bool landmarksIgnored() const {return landmarksIgnored_;}
+	float gravitySigma() const {return gravitySigma_;}
 
 	// setters
 	void setIterations(int iterations) {iterations_ = iterations;}
@@ -99,6 +100,7 @@ public:
 	void setRobust(bool enabled) {robust_ = enabled;}
 	void setPriorsIgnored(bool enabled) {priorsIgnored_ = enabled;}
 	void setLandmarksIgnored(bool enabled) {landmarksIgnored_ = enabled;}
+	void setGravitySigma(float value) {gravitySigma_ = value;}
 
 	virtual void parseParameters(const ParametersMap & parameters);
 
@@ -175,7 +177,8 @@ protected:
 			double epsilon         = Parameters::defaultOptimizerEpsilon(),
 			bool robust            = Parameters::defaultOptimizerRobust(),
 			bool priorsIgnored     = Parameters::defaultOptimizerPriorsIgnored(),
-			bool landmarksIgnored  = Parameters::defaultOptimizerLandmarksIgnored());
+			bool landmarksIgnored  = Parameters::defaultOptimizerLandmarksIgnored(),
+			float gravitySigma     = Parameters::defaultOptimizerGravitySigma());
 	Optimizer(const ParametersMap & parameters);
 
 private:
@@ -186,6 +189,7 @@ private:
 	bool robust_;
 	bool priorsIgnored_;
 	bool landmarksIgnored_;
+	float gravitySigma_;
 };
 
 } /* namespace rtabmap */

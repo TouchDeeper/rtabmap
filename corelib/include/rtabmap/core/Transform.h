@@ -31,6 +31,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/RtabmapExp.h>
 #include <vector>
 #include <string>
+#include <map>
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <opencv2/core/core.hpp>
@@ -148,6 +149,14 @@ public:
 	 */
 	static Transform fromString(const std::string & string);
 	static bool canParseString(const std::string & string);
+
+	static Transform getTransform(
+				const std::map<double, Transform> & tfBuffer,
+				const double & stamp);
+	RTABMAP_DEPRECATED(static Transform getClosestTransform(
+				const std::map<double, Transform> & tfBuffer,
+				const double & stamp,
+				double * stampDiff), "Use Transform::getTransform() instead to get always accurate transforms.");
 
 private:
 	cv::Mat data_;

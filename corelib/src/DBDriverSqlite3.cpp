@@ -1760,10 +1760,9 @@ void DBDriverSqlite3::loadNodeDataQuery(std::list<Signature *> & signatures, boo
 					viewPoint.z = sqlite3_column_double(ppStmt, index++);
 				}
 
-				SensorData tmp = (*iter)->sensorData();
-				LaserScan laserScan =  tmp.laserScanCompressed();
 				if(scan)
 				{
+					LaserScan laserScan;
 					if(laserScanAngleMin < laserScanAngleMax && laserScanAngleInc != 0.0f)
 					{
 						laserScan = LaserScan(scanCompressed, (LaserScan::Format)laserScanFormat, laserScanMinRange, laserScanMaxRange, laserScanAngleMin, laserScanAngleMax, laserScanAngleInc, scanLocalTransform);
@@ -1772,37 +1771,29 @@ void DBDriverSqlite3::loadNodeDataQuery(std::list<Signature *> & signatures, boo
 					{
 						laserScan = LaserScan(scanCompressed, laserScanMaxPts, laserScanMaxRange, (LaserScan::Format)laserScanFormat, scanLocalTransform);
 					}
+					(*iter)->sensorData().setLaserScan(laserScan);
 				}
-				if(models.size())
+				if(images)
 				{
-					(*iter)->sensorData() = SensorData(
-						    laserScan,
-							images?imageCompressed:tmp.imageCompressed(),
-							images?depthOrRightCompressed:tmp.depthOrRightCompressed(),
-							images?models:tmp.cameraModels(),
-							(*iter)->id(),
-							(*iter)->getStamp(),
-							userData?userDataCompressed:tmp.userDataCompressed());
+					if(models.size())
+					{
+						(*iter)->sensorData().setRGBDImage(imageCompressed, depthOrRightCompressed, models);
+					}
+					else
+					{
+						(*iter)->sensorData().setStereoImage(imageCompressed, depthOrRightCompressed, stereoModel);
+					}
 				}
-				else
+				if(userData)
 				{
-					(*iter)->sensorData() = SensorData(
-							laserScan,
-							images?imageCompressed:tmp.imageCompressed(),
-							images?depthOrRightCompressed:tmp.depthOrRightCompressed(),
-							images?stereoModel:tmp.stereoCameraModel(),
-							(*iter)->id(),
-							(*iter)->getStamp(),
-							userData?userDataCompressed:tmp.userDataCompressed());
+					(*iter)->sensorData().setUserData(userDataCompressed);
 				}
+
 				if(occupancyGrid)
 				{
 					(*iter)->sensorData().setOccupancyGrid(groundCellsCompressed, obstacleCellsCompressed, emptyCellsCompressed, cellSize, viewPoint);
 				}
-				else
-				{
-					(*iter)->sensorData().setOccupancyGrid(tmp.gridGroundCellsCompressed(), tmp.gridObstacleCellsCompressed(), tmp.gridEmptyCellsCompressed(), tmp.gridCellSize(), tmp.gridViewPoint());
-				}
+
 				rc = sqlite3_step(ppStmt); // next result...
 			}
 			UASSERT_MSG(rc == SQLITE_DONE, uFormat("DB error (%s): %s", _version.c_str(), sqlite3_errmsg(_ppDb)).c_str());
@@ -2382,18 +2373,28 @@ void DBDriverSqlite3::getAllNodeIdsQuery(std::set<int> & ids, bool ignoreChildre
 			  << "FROM Node ";
 		if(ignoreChildren)
 		{
-			query << "INNER JOIN Link "
-				  << "ON id = to_id "; // use to_id to ignore all children (which don't have link pointing on them)
+			query << "INNER JOIN Link ";
+			query << "ON id = to_id "; // use to_id to ignore all children (which don't have link pointing on them)
+			query << "WHERE from_id != to_id "; // ignore self referring links
 		}
+
 		if(ignoreBadSignatures)
 		{
-			if(uStrNumCmp(_version, "0.13.0") >= 0)
+			if(ignoreChildren)
 			{
-				query << "WHERE id in (select node_id from Feature) ";
+				query << "AND ";
 			}
 			else
 			{
-				query << "WHERE id in (select node_id from Map_Node_Word) ";
+				query << "WHERE ";
+			}
+			if(uStrNumCmp(_version, "0.13.0") >= 0)
+			{
+				query << " id in (select node_id from Feature) ";
+			}
+			else
+			{
+				query << " id in (select node_id from Map_Node_Word) ";
 			}
 		}
 		query  << "ORDER BY id";
@@ -3614,7 +3615,7 @@ void DBDriverSqlite3::loadWordsQuery(const std::set<int> & wordIds, std::list<Vi
 
 void DBDriverSqlite3::loadLinksQuery(
 		int signatureId,
-		std::map<int, Link> & links,
+		std::multimap<int, Link> & links,
 		Link::Type typeIn) const
 {
 	links.clear();
@@ -4050,8 +4051,8 @@ void DBDriverSqlite3::updateQuery(const std::list<Signature *> & nodes, bool upd
 			if((*j)->isLinksModified())
 			{
 				// Save links
-				const std::map<int, Link> & links = (*j)->getLinks();
-				for(std::map<int, Link>::const_iterator i=links.begin(); i!=links.end(); ++i)
+				const std::multimap<int, Link> & links = (*j)->getLinks();
+				for(std::multimap<int, Link>::const_iterator i=links.begin(); i!=links.end(); ++i)
 				{
 					stepLink(ppStmt, i->second);
 				}
@@ -4164,8 +4165,8 @@ void DBDriverSqlite3::saveQuery(const std::list<Signature *> & signatures)
 		for(std::list<Signature *>::const_iterator jter=signatures.begin(); jter!=signatures.end(); ++jter)
 		{
 			// Save links
-			const std::map<int, Link> & links = (*jter)->getLinks();
-			for(std::map<int, Link>::const_iterator i=links.begin(); i!=links.end(); ++i)
+			const std::multimap<int, Link> & links = (*jter)->getLinks();
+			for(std::multimap<int, Link>::const_iterator i=links.begin(); i!=links.end(); ++i)
 			{
 				stepLink(ppStmt, i->second);
 			}

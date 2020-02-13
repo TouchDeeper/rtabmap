@@ -40,6 +40,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/core/optimizer/OptimizerG2O.h>
 #include <rtabmap/core/optimizer/OptimizerGTSAM.h>
 #include <rtabmap/core/optimizer/OptimizerCVSBA.h>
+#include <rtabmap/core/optimizer/OptimizerCeres.h>
 
 namespace rtabmap {
 
@@ -61,6 +62,10 @@ bool Optimizer::isAvailable(Optimizer::Type type)
 	{
 		return OptimizerTORO::available();
 	}
+	else if(type == Optimizer::kTypeCeres)
+	{
+		return OptimizerCeres::available();
+	}
 	return false;
 }
 
@@ -73,7 +78,7 @@ Optimizer * Optimizer::create(const ParametersMap & parameters)
 
 Optimizer * Optimizer::create(Optimizer::Type type, const ParametersMap & parameters)
 {
-	UASSERT_MSG(OptimizerG2O::available() || OptimizerGTSAM::available() || OptimizerTORO::available(),
+	UASSERT_MSG(OptimizerG2O::available() || OptimizerGTSAM::available() || OptimizerTORO::available() || OptimizerCeres::available(),
 			"RTAB-Map is not built with any graph optimization approach!");
 
 	if(!OptimizerTORO::available() && type == Optimizer::kTypeTORO)
@@ -88,6 +93,11 @@ Optimizer * Optimizer::create(Optimizer::Type type, const ParametersMap & parame
 			UWARN("TORO optimizer not available. g2o will be used instead.");
 					type = Optimizer::kTypeG2O;
 		}
+		else if(OptimizerCeres::available())
+		{
+			UWARN("TORO optimizer not available. ceres will be used instead.");
+					type = Optimizer::kTypeCeres;
+		}
 	}
 	if(!OptimizerG2O::available() && type == Optimizer::kTypeG2O)
 	{
@@ -101,6 +111,11 @@ Optimizer * Optimizer::create(Optimizer::Type type, const ParametersMap & parame
 			UWARN("g2o optimizer not available. GTSAM will be used instead.");
 					type = Optimizer::kTypeGTSAM;
 		}
+		else if(OptimizerCeres::available())
+		{
+			UWARN("g2o optimizer not available. ceres will be used instead.");
+					type = Optimizer::kTypeCeres;
+		}
 	}
 	if(!OptimizerGTSAM::available() && type == Optimizer::kTypeGTSAM)
 	{
@@ -113,6 +128,11 @@ Optimizer * Optimizer::create(Optimizer::Type type, const ParametersMap & parame
 		{
 			UWARN("GTSAM optimizer not available. g2o will be used instead.");
 					type = Optimizer::kTypeG2O;
+		}
+		else if(OptimizerCeres::available())
+		{
+			UWARN("GTSAM optimizer not available. ceres will be used instead.");
+					type = Optimizer::kTypeCeres;
 		}
 	}
 	if(!OptimizerCVSBA::available() && type == Optimizer::kTypeCVSBA)
@@ -132,6 +152,29 @@ Optimizer * Optimizer::create(Optimizer::Type type, const ParametersMap & parame
 			UWARN("CVSBA optimizer not available. g2o will be used instead.");
 					type = Optimizer::kTypeG2O;
 		}
+		else if(OptimizerCeres::available())
+		{
+			UWARN("CVSBA optimizer not available. ceres will be used instead.");
+					type = Optimizer::kTypeCeres;
+		}
+	}
+	if(!OptimizerCeres::available() && type == Optimizer::kTypeCeres)
+	{
+		if(OptimizerGTSAM::available())
+		{
+			UWARN("Ceres optimizer not available. gtsam will be used instead.");
+					type = Optimizer::kTypeGTSAM;
+		}
+		else if(OptimizerG2O::available())
+		{
+			UWARN("Ceres optimizer not available. g2o will be used instead.");
+					type = Optimizer::kTypeG2O;
+		}
+		else if(OptimizerTORO::available())
+		{
+			UWARN("Ceres optimizer not available. TORO will be used instead.");
+					type = Optimizer::kTypeTORO;
+		}
 	}
 	Optimizer * optimizer = 0;
 	switch(type)
@@ -144,6 +187,9 @@ Optimizer * Optimizer::create(Optimizer::Type type, const ParametersMap & parame
 		break;
 	case Optimizer::kTypeCVSBA:
 		optimizer = new OptimizerCVSBA(parameters);
+		break;
+	case Optimizer::kTypeCeres:
+		optimizer = new OptimizerCeres(parameters);
 		break;
 	case Optimizer::kTypeTORO:
 	default:
@@ -159,84 +205,118 @@ void Optimizer::getConnectedGraph(
 		const std::map<int, Transform> & posesIn,
 		const std::multimap<int, Link> & linksIn,
 		std::map<int, Transform> & posesOut,
-		std::multimap<int, Link> & linksOut,
-		int depth)
+		std::multimap<int, Link> & linksOut) const
 {
-	UASSERT(depth >= 0);
+	UDEBUG("IN: fromId=%d poses=%d links=%d priorsIgnored=%d landmarksIgnored=%d", fromId, (int)posesIn.size(), (int)linksIn.size(), priorsIgnored()?1:0, landmarksIgnored()?1:0);
 	UASSERT(fromId>0);
 	UASSERT(uContains(posesIn, fromId));
 
 	posesOut.clear();
 	linksOut.clear();
 
-	std::set<int> curentPoses;
 	std::set<int> nextPoses;
 	nextPoses.insert(fromId);
-	int d = 0;
 	std::multimap<int, int> biLinks;
 	for(std::multimap<int, Link>::const_iterator iter=linksIn.begin(); iter!=linksIn.end(); ++iter)
 	{
-		UASSERT_MSG(graph::findLink(biLinks, iter->second.from(), iter->second.to()) == biLinks.end(),
-				uFormat("Input links should be unique between two poses (%d->%d).",
-						iter->second.from(), iter->second.to()).c_str());
-		biLinks.insert(std::make_pair(iter->second.from(), iter->second.to()));
 		if(iter->second.from() != iter->second.to())
 		{
-			biLinks.insert(std::make_pair(iter->second.to(), iter->second.from()));
+			if(graph::findLink(biLinks, iter->second.from(), iter->second.to()) == biLinks.end())
+			{
+				biLinks.insert(std::make_pair(iter->second.from(), iter->second.to()));
+				biLinks.insert(std::make_pair(iter->second.to(), iter->second.from()));
+			}
 		}
 	}
 
-	while((depth == 0 || d < depth) && nextPoses.size())
+	while(nextPoses.size())
 	{
-		curentPoses = nextPoses;
-		nextPoses.clear();
+		int fromId = *nextPoses.rbegin(); // fill up all nodes before landmarks
+		nextPoses.erase(*nextPoses.rbegin());
 
-		for(std::set<int>::iterator jter = curentPoses.begin(); jter!=curentPoses.end(); ++jter)
+		if(posesOut.empty())
 		{
-			int fromId = *jter;
-			if(posesOut.empty())
-			{
-				posesOut.insert(*posesIn.find(fromId));
-			}
+			posesOut.insert(std::make_pair(fromId, posesIn.find(fromId)->second));
 
-			for(std::multimap<int, int>::const_iterator iter=biLinks.find(fromId); iter!=biLinks.end() && iter->first==fromId; ++iter)
+			// add prior links
+			for(std::multimap<int, Link>::const_iterator pter=linksIn.find(fromId); pter!=linksIn.end() && pter->first==fromId; ++pter)
 			{
-				int toId = iter->second;
-				if(posesIn.find(toId) != posesIn.end())
+				if(pter->second.from() == pter->second.to() && (!priorsIgnored() || pter->second.type() != Link::kPosePrior))
 				{
-					std::multimap<int, Link>::const_iterator kter = graph::findLink(linksIn, fromId, toId);
-					int nextDepth = toId!=fromId?depth-1:depth;
-					if(depth == 0 || d < nextDepth || curentPoses.find(toId) != curentPoses.end())
+					linksOut.insert(*pter);
+				}
+			}
+		}
+
+		for(std::multimap<int, int>::const_iterator iter=biLinks.find(fromId); iter!=biLinks.end() && iter->first==fromId; ++iter)
+		{
+			int toId = iter->second;
+			if(posesIn.find(toId) != posesIn.end() && (!landmarksIgnored() || toId>0))
+			{
+				std::multimap<int, Link>::const_iterator kter = graph::findLink(linksIn, fromId, toId);
+				if(nextPoses.find(toId) == nextPoses.end())
+				{
+					if(!uContains(posesOut, toId))
 					{
-						if(!uContains(posesOut, toId))
+						if(isSlam2d() && kter->second.type() == Link::kLandmark && toId>0)
 						{
-							posesOut.insert(std::make_pair(toId, posesOut.at(fromId) * (kter->second.from()==fromId?kter->second.transform():kter->second.transform().inverse())));
-							if(curentPoses.find(toId) == curentPoses.end())
+							Transform t;
+							if(kter->second.from()==fromId)
 							{
-								nextPoses.insert(toId);
+								t = kter->second.transform();
+							}
+							else
+							{
+								t = kter->second.transform().inverse();
+							}
+							posesOut.insert(std::make_pair(toId, (posesOut.at(fromId) * t).to3DoF()));
+						}
+						else
+						{
+							Transform t = posesOut.at(fromId) * (kter->second.from()==fromId?kter->second.transform():kter->second.transform().inverse());
+							posesOut.insert(std::make_pair(toId, t));
+						}
+						// add prior links
+						for(std::multimap<int, Link>::const_iterator pter=linksIn.find(toId); pter!=linksIn.end() && pter->first==toId; ++pter)
+						{
+							if(pter->second.from() == pter->second.to() && (!priorsIgnored() || pter->second.type() != Link::kPosePrior))
+							{
+								linksOut.insert(*pter);
 							}
 						}
-						if(graph::findLink(linksOut, fromId, toId) == linksOut.end())
+
+						nextPoses.insert(toId);
+					}
+
+					// only add unique links
+					if(graph::findLink(linksOut, fromId, toId) == linksOut.end())
+					{
+						if(kter->second.to() < 0)
 						{
-							// only add unique links
+							// For landmarks, make sure fromId is the landmark
+							linksOut.insert(std::make_pair(kter->second.to(), kter->second.inverse()));
+						}
+						else
+						{
 							linksOut.insert(*kter);
 						}
 					}
 				}
 			}
 		}
-		++d;
 	}
+	UDEBUG("OUT: poses=%d links=%d", (int)posesOut.size(), (int)linksOut.size());
 }
 
-Optimizer::Optimizer(int iterations, bool slam2d, bool covarianceIgnored, double epsilon, bool robust, bool priorsIgnored, bool landmarksIgnored) :
+Optimizer::Optimizer(int iterations, bool slam2d, bool covarianceIgnored, double epsilon, bool robust, bool priorsIgnored, bool landmarksIgnored, float gravitySigma) :
 		iterations_(iterations),
 		slam2d_(slam2d),
 		covarianceIgnored_(covarianceIgnored),
 		epsilon_(epsilon),
 		robust_(robust),
 		priorsIgnored_(priorsIgnored),
-		landmarksIgnored_(landmarksIgnored)
+		landmarksIgnored_(landmarksIgnored),
+		gravitySigma_(gravitySigma)
 {
 }
 
@@ -247,7 +327,8 @@ Optimizer::Optimizer(const ParametersMap & parameters) :
 		epsilon_(Parameters::defaultOptimizerEpsilon()),
 		robust_(Parameters::defaultOptimizerRobust()),
 		priorsIgnored_(Parameters::defaultOptimizerPriorsIgnored()),
-		landmarksIgnored_(Parameters::defaultOptimizerLandmarksIgnored())
+		landmarksIgnored_(Parameters::defaultOptimizerLandmarksIgnored()),
+		gravitySigma_(Parameters::defaultOptimizerGravitySigma())
 {
 	parseParameters(parameters);
 }
@@ -261,6 +342,7 @@ void Optimizer::parseParameters(const ParametersMap & parameters)
 	Parameters::parse(parameters, Parameters::kOptimizerRobust(), robust_);
 	Parameters::parse(parameters, Parameters::kOptimizerPriorsIgnored(), priorsIgnored_);
 	Parameters::parse(parameters, Parameters::kOptimizerLandmarksIgnored(), landmarksIgnored_);
+	Parameters::parse(parameters, Parameters::kOptimizerGravitySigma(), gravitySigma_);
 }
 
 std::map<int, Transform> Optimizer::optimizeIncremental(
@@ -522,7 +604,7 @@ void Optimizer::computeBACorrespondences(
 					ParametersMap regParam;
 					regParam.insert(ParametersPair(Parameters::kVisEstimationType(), "1"));
 					regParam.insert(ParametersPair(Parameters::kVisPnPReprojError(), "5"));
-					regParam.insert(ParametersPair(Parameters::kVisMinInliers(), "5"));
+					regParam.insert(ParametersPair(Parameters::kVisMinInliers(), "6"));
 					regParam.insert(ParametersPair(Parameters::kVisCorNNDR(), "0.6"));
 					RegistrationVis reg(regParam);
 

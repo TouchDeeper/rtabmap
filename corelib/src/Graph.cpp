@@ -85,11 +85,12 @@ bool exportPoses(
 			tmpPath+=".txt";
 		}
 
-		if(format == 1)
+		if(format == 1 || format == 10)
 		{
 			if(stamps.size() != poses.size())
 			{
-				UERROR("When exporting poses to format 1 (RGBD-SLAM), stamps and poses maps should have the same size!");
+				UERROR("When exporting poses to format 1 (RGBD-SLAM), stamps and poses maps should have the same size! stamps=%d psoes=%d",
+						(int)stamps.size(), (int)poses.size());
 				return false;
 			}
 		}
@@ -690,6 +691,48 @@ void calcKittiSequenceErrors (
 }
 // KITTI evaluation end
 
+void calcRelativeErrors (
+		const std::vector<Transform> &poses_gt,
+		const std::vector<Transform> &poses_result,
+		float & t_err,
+		float & r_err) {
+
+	UASSERT(poses_gt.size() == poses_result.size());
+
+	// error vector
+	std::vector<errors> err;
+
+	// for all start positions do
+	for (unsigned int i=0; i<poses_gt.size()-1; ++i)
+	{
+		// compute rotational and translational errors
+		Transform pose_delta_gt     = poses_gt[i].inverse()*poses_gt[i+1];
+		Transform pose_delta_result = poses_result[i].inverse()*poses_result[i+1];
+		Transform pose_error        = pose_delta_result.inverse()*pose_delta_gt;
+		float r_err = pose_error.getAngle();
+		float t_err = pose_error.getNorm();
+
+		// write to file
+		err.push_back(errors(i,r_err,t_err,0,0));
+	}
+
+	t_err = 0;
+	r_err = 0;
+
+	// for all errors do => compute sum of t_err, r_err
+	for (std::vector<errors>::iterator it=err.begin(); it!=err.end(); it++)
+	{
+		t_err += it->t_err;
+		r_err += it->r_err;
+	}
+
+	// save errors
+	float num = err.size();
+	t_err /= num;
+	r_err /= num;
+	r_err *= 180/CV_PI; // Rotation error (deg)
+}
+
 Transform calcRMSE (
 		const std::map<int, Transform> & groundTruth,
 		const std::map<int, Transform> & poses,
@@ -842,6 +885,7 @@ void computeMaxGraphErrors(
 	maxLinearError = -1;
 	maxAngularError = -1;
 
+	UDEBUG("poses=%d links=%d", (int)poses.size(), (int)links.size());
 	for(std::multimap<int, Link>::const_iterator iter=links.begin(); iter!=links.end(); ++iter)
 	{
 		// ignore links with high variance, priors and landmarks
@@ -855,8 +899,8 @@ void computeMaxGraphErrors(
 					fabs(iter->second.transform().x() - t.x()),
 					fabs(iter->second.transform().y() - t.y()),
 					fabs(iter->second.transform().z() - t.z()));
-			UASSERT(iter->second.transVariance()>0.0);
-			float stddevLinear = sqrt(iter->second.transVariance());
+			UASSERT(iter->second.transVariance(false)>0.0);
+			float stddevLinear = sqrt(iter->second.transVariance(false));
 			float linearErrorRatio = linearError/stddevLinear;
 			if(linearErrorRatio > maxLinearErrorRatio)
 			{
@@ -877,8 +921,8 @@ void computeMaxGraphErrors(
 					fabs(opt_pitch - link_pitch),
 					fabs(opt_yaw - link_yaw));
 			angularError = angularError>M_PI?2*M_PI-angularError:angularError;
-			UASSERT(iter->second.rotVariance()>0.0);
-			float stddevAngular = sqrt(iter->second.rotVariance());
+			UASSERT(iter->second.rotVariance(false)>0.0);
+			float stddevAngular = sqrt(iter->second.rotVariance(false));
 			float angularErrorRatio = angularError/stddevAngular;
 			if(angularErrorRatio > maxAngularErrorRatio)
 			{
@@ -988,12 +1032,13 @@ std::multimap<int, Link>::const_iterator findLink(
 		const std::multimap<int, Link> & links,
 		int from,
 		int to,
-		bool checkBothWays)
+		bool checkBothWays,
+		Link::Type type)
 {
 	std::multimap<int, Link>::const_iterator iter = links.find(from);
 	while(iter != links.end() && iter->first == from)
 	{
-		if(iter->second.to() == to)
+		if(iter->second.to() == to && (type==Link::kUndef || type == iter->second.type()))
 		{
 			return iter;
 		}
@@ -1006,7 +1051,7 @@ std::multimap<int, Link>::const_iterator findLink(
 		iter = links.find(to);
 		while(iter != links.end() && iter->first == to)
 		{
-			if(iter->second.to() == from)
+			if(iter->second.to() == from && (type==Link::kUndef || type == iter->second.type()))
 			{
 				return iter;
 			}
@@ -1073,7 +1118,7 @@ std::multimap<int, Link> filterDuplicateLinks(
 	std::multimap<int, Link> output;
 	for(std::multimap<int, Link>::const_iterator iter=links.begin(); iter!=links.end(); ++iter)
 	{
-		if(graph::findLink(output, iter->second.from(), iter->second.to(), true) == output.end())
+		if(graph::findLink(output, iter->second.from(), iter->second.to(), true, iter->second.type()) == output.end())
 		{
 			output.insert(*iter);
 		}
@@ -1088,7 +1133,14 @@ std::multimap<int, Link> filterLinks(
 	std::multimap<int, Link> output;
 	for(std::multimap<int, Link>::const_iterator iter=links.begin(); iter!=links.end(); ++iter)
 	{
-		if(iter->second.type() != filteredType)
+		if(filteredType == Link::kSelfRefLink)
+		{
+			if(iter->second.from() != iter->second.to())
+			{
+				output.insert(*iter);
+			}
+		}
+		else if(iter->second.type() != filteredType)
 		{
 			output.insert(*iter);
 		}
@@ -1103,7 +1155,14 @@ std::map<int, Link> filterLinks(
 	std::map<int, Link> output;
 	for(std::map<int, Link>::const_iterator iter=links.begin(); iter!=links.end(); ++iter)
 	{
-		if(iter->second.type() != filteredType)
+		if(filteredType == Link::kSelfRefLink)
+		{
+			if(iter->second.from() != iter->second.to())
+			{
+				output.insert(*iter);
+			}
+		}
+		else if(iter->second.type() != filteredType)
 		{
 			output.insert(*iter);
 		}
@@ -1854,7 +1913,7 @@ std::list<std::pair<int, Transform> > computePath(
 		}
 
 		// lookup neighbors
-		std::map<int, Link> links;
+		std::multimap<int, Link> links;
 		if(allLinks.size() == 0)
 		{
 			links = memory->getLinks(currentNode->id(), lookInDatabase, true);
@@ -1868,7 +1927,7 @@ std::list<std::pair<int, Transform> > computePath(
 				links.insert(std::make_pair(iter->second.to(), iter->second));
 			}
 		}
-		for(std::map<int, Link>::const_iterator iter = links.begin(); iter!=links.end(); ++iter)
+		for(std::multimap<int, Link>::const_iterator iter = links.begin(); iter!=links.end(); ++iter)
 		{
 			if(iter->second.from() != iter->second.to())
 			{

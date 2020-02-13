@@ -59,6 +59,20 @@ AboutDialog::AboutDialog(QWidget * parent) :
 	_ui->label_pcl_version->setText(PCL_VERSION_PRETTY);
 	_ui->label_vtk_version->setText(vtkVersion::GetVTKVersion());
 	_ui->label_qt_version->setText(qVersion());
+#ifdef RTABMAP_ORB_OCTREE
+	_ui->label_orboctree->setText("Yes");
+	_ui->label_orboctree_license->setEnabled(true);
+#else
+	_ui->label_orboctree->setText("No");
+	_ui->label_orboctree_license->setEnabled(false);
+#endif
+#ifdef RTABMAP_FASTCV
+	_ui->label_fastcv->setText("Yes");
+	_ui->label_fastcv_license->setEnabled(true);
+#else
+	_ui->label_fastcv->setText("No");
+	_ui->label_fastcv_license->setEnabled(false);
+#endif
 #ifdef RTABMAP_OCTOMAP
 	_ui->label_octomap->setText("Yes");
 	_ui->label_octomap_license->setEnabled(true);
@@ -78,6 +92,13 @@ AboutDialog::AboutDialog(QWidget * parent) :
 #else
 	_ui->label_openchisel->setText("No");
 #endif
+#ifdef RTABMAP_ALICE_VISION
+	_ui->label_aliceVision->setText("Yes");
+	_ui->label_aliceVision_license->setEnabled(true);
+#else
+	_ui->label_aliceVision->setText("No");
+	_ui->label_aliceVision_license->setEnabled(false);
+#endif
 
 	_ui->label_freenect->setText(CameraFreenect::available()?"Yes":"No");
 	_ui->label_freenect_license->setEnabled(CameraFreenect::available());
@@ -93,6 +114,8 @@ AboutDialog::AboutDialog(QWidget * parent) :
 	_ui->label_dc1394_license->setEnabled(CameraStereoDC1394::available());
 	_ui->label_flycapture2->setText(CameraStereoFlyCapture2::available()?"Yes":"No");
 	_ui->label_zed->setText(CameraStereoZed::available()?"Yes":"No");
+	_ui->label_k4w2->setText(CameraK4W2::available() ? "Yes" : "No");
+	_ui->label_k4a->setText(CameraK4A::available() ? "Yes" : "No");
 
 	_ui->label_toro->setText(Optimizer::isAvailable(Optimizer::kTypeTORO)?"Yes":"No");
 	_ui->label_toro_license->setEnabled(Optimizer::isAvailable(Optimizer::kTypeTORO)?true:false);
@@ -102,6 +125,8 @@ AboutDialog::AboutDialog(QWidget * parent) :
 	_ui->label_gtsam_license->setEnabled(Optimizer::isAvailable(Optimizer::kTypeGTSAM)?true:false);
 	_ui->label_cvsba->setText(Optimizer::isAvailable(Optimizer::kTypeCVSBA)?"Yes":"No");
 	_ui->label_cvsba_license->setEnabled(Optimizer::isAvailable(Optimizer::kTypeCVSBA)?true:false);
+	_ui->label_ceres->setText(Optimizer::isAvailable(Optimizer::kTypeCeres)?"Yes":"No");
+	_ui->label_ceres_license->setEnabled(Optimizer::isAvailable(Optimizer::kTypeCeres)?true:false);
 
 #ifdef RTABMAP_POINTMATCHER
 	_ui->label_libpointmatcher->setText("Yes");

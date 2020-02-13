@@ -66,7 +66,7 @@ VWDictionary::VWDictionary(const ParametersMap & parameters) :
 	_incrementalFlann(Parameters::defaultKpIncrementalFlann()),
 	_rebalancingFactor(Parameters::defaultKpFlannRebalancingFactor()),
 	_nndrRatio(Parameters::defaultKpNndrRatio()),
-	_dictionaryPath(Parameters::defaultKpDictionaryPath()),
+	_newDictionaryPath(Parameters::defaultKpDictionaryPath()),
 	_newWordsComparedTogether(Parameters::defaultKpNewWordsComparedTogether()),
 	_lastWordId(0),
 	useDistanceL1_(false),
@@ -93,11 +93,10 @@ void VWDictionary::parseParameters(const ParametersMap & parameters)
 
 	UASSERT_MSG(_nndrRatio > 0.0f, uFormat("String=%s value=%f", uContains(parameters, Parameters::kKpNndrRatio())?parameters.at(Parameters::kKpNndrRatio()).c_str():"", _nndrRatio).c_str());
 
-	std::string dictionaryPath = _dictionaryPath;
 	bool incrementalDictionary = _incrementalDictionary;
 	if((iter=parameters.find(Parameters::kKpDictionaryPath())) != parameters.end())
 	{
-		dictionaryPath = (*iter).second.c_str();
+		_newDictionaryPath = (*iter).second.c_str();
 	}
 	if((iter=parameters.find(Parameters::kKpIncrementalDictionary())) != parameters.end())
 	{
@@ -115,11 +114,7 @@ void VWDictionary::parseParameters(const ParametersMap & parameters)
 	{
 		this->setIncrementalDictionary();
 	}
-	else
-	{
-		this->setFixedDictionary(dictionaryPath);
-	}
-
+	_incrementalDictionary = incrementalDictionary;
 }
 
 void VWDictionary::setIncrementalDictionary()
@@ -133,21 +128,23 @@ void VWDictionary::setIncrementalDictionary()
 		}
 	}
 	_dictionaryPath = "";
+	_newDictionaryPath = "";
 }
 
 void VWDictionary::setFixedDictionary(const std::string & dictionaryPath)
 {
+	UDEBUG("");
 	if(!dictionaryPath.empty())
 	{
 		if((!_incrementalDictionary && _dictionaryPath.compare(dictionaryPath) != 0) ||
 		   _visualWords.size() == 0)
 		{
-			UDEBUG("incremental=%d, oldPath=%s newPath=%s, visual words=%d",
+			UINFO("incremental=%d, oldPath=%s newPath=%s, visual words=%d",
 					_incrementalDictionary?1:0, _dictionaryPath.c_str(), dictionaryPath.c_str(), (int)_visualWords.size());
 
 			if(UFile::getExtension(dictionaryPath).compare("db") == 0)
 			{
-				UDEBUG("Loading fixed vocabulary \"%s\", this may take a while...", dictionaryPath.c_str());
+				UWARN("Loading fixed vocabulary \"%s\", this may take a while...", dictionaryPath.c_str());
 				DBDriver * driver = DBDriver::create();
 				if(driver->openConnection(dictionaryPath, false))
 				{
@@ -252,9 +249,11 @@ void VWDictionary::setFixedDictionary(const std::string & dictionaryPath)
 			}
 			else
 			{
-				this->update();
+				_dictionaryPath = dictionaryPath;
+				_newDictionaryPath = dictionaryPath;
 				_incrementalDictionary = false;
-				UDEBUG("Loaded %d words!", (int)_visualWords.size());
+				this->update();
+				UWARN("Loaded %d words!", (int)_visualWords.size());
 			}
 		}
 		else if(!_incrementalDictionary)
@@ -275,6 +274,7 @@ void VWDictionary::setFixedDictionary(const std::string & dictionaryPath)
 		_incrementalDictionary = false;
 	}
 	_dictionaryPath = dictionaryPath;
+	_newDictionaryPath = dictionaryPath;
 }
 
 void VWDictionary::setNNStrategy(NNStrategy strategy)
@@ -345,15 +345,76 @@ unsigned int VWDictionary::getIndexMemoryUsed() const
 	return _flannIndex->memoryUsed();
 }
 
+cv::Mat VWDictionary::convertBinTo32F(const cv::Mat & descriptorsIn)
+{
+	// Old approach
+	//cv::Mat descriptorsOut;
+	//descriptorsIn.convertTo(descriptorsOut, CV_32F);
+	//return descriptorsOut;
+
+	// New approach
+	UASSERT(descriptorsIn.type() == CV_8UC1);
+	cv::Mat descriptorsOut(descriptorsIn.rows, descriptorsIn.cols*8, CV_32FC1);
+	for(int i=0; i<descriptorsIn.rows; ++i)
+	{
+		const unsigned char * ptrIn = descriptorsIn.ptr(i);
+		float * ptrOut = descriptorsOut.ptr<float>(i);
+		for(int j=0; j<descriptorsIn.cols; ++j)
+		{
+			int jo = j*8;
+			ptrOut[jo] = (ptrIn[j] & 1) == 1?1.0f:0.0f;
+			ptrOut[jo+1] = (ptrIn[j] & (1<<1)) != 0?1.0f:0.0f;
+			ptrOut[jo+2] = (ptrIn[j] & (1<<2)) != 0?1.0f:0.0f;
+			ptrOut[jo+3] = (ptrIn[j] & (1<<3)) != 0?1.0f:0.0f;
+			ptrOut[jo+4] = (ptrIn[j] & (1<<4)) != 0?1.0f:0.0f;
+			ptrOut[jo+5] = (ptrIn[j] & (1<<5)) != 0?1.0f:0.0f;
+			ptrOut[jo+6] = (ptrIn[j] & (1<<6)) != 0?1.0f:0.0f;
+			ptrOut[jo+7] = (ptrIn[j] & (1<<7)) != 0?1.0f:0.0f;
+		}
+	}
+	return descriptorsOut;
+}
+
+cv::Mat VWDictionary::convert32FToBin(const cv::Mat & descriptorsIn)
+{
+	UASSERT(descriptorsIn.type() == CV_32FC1 && descriptorsIn.cols % 8 == 0);
+	cv::Mat descriptorsOut(descriptorsIn.rows, descriptorsIn.cols/8, CV_8UC1);
+	for(int i=0; i<descriptorsIn.rows; ++i)
+	{
+		const float * ptrIn = descriptorsIn.ptr<float>(i);
+		unsigned char * ptrOut = descriptorsOut.ptr(i);
+		for(int j=0; j<descriptorsOut.cols; ++j)
+		{
+			int jo = j*8;
+			ptrOut[j] =
+					(unsigned char)(ptrIn[jo] == 0?0:1) |
+					(ptrIn[jo+1] == 0?0:(1<<1)) |
+					(ptrIn[jo+2] == 0?0:(1<<2)) |
+					(ptrIn[jo+3] == 0?0:(1<<3)) |
+					(ptrIn[jo+4] == 0?0:(1<<4)) |
+					(ptrIn[jo+5] == 0?0:(1<<5)) |
+					(ptrIn[jo+6] == 0?0:(1<<6)) |
+					(ptrIn[jo+7] == 0?0:(1<<7));
+		}
+	}
+	return descriptorsOut;
+}
+
 void VWDictionary::update()
 {
-	ULOGGER_DEBUG("");
-	if(!_incrementalDictionary && !_notIndexedWords.size())
+	ULOGGER_DEBUG("incremental=%d", _incrementalDictionary?1:0);
+	if(!_incrementalDictionary)
 	{
-		// No need to update the search index if we
-		// use a fixed dictionary and the index is
-		// already built
-		return;
+		// reload the fixed dictionary if it has been cleared or not yet initialized
+		this->setFixedDictionary(_newDictionaryPath);
+
+		if(!_incrementalDictionary && !_notIndexedWords.size())
+		{
+			// No need to update the search index if we
+			// use a fixed dictionary and the index is
+			// already built
+			return;
+		}
 	}
 
 	if(_notIndexedWords.size() || _visualWords.size() == 0 || _removedIndexedWords.size())
@@ -385,9 +446,9 @@ void VWDictionary::update()
 					if(w->getDescriptor().type() == CV_8U)
 					{
 						useDistanceL1_ = true;
-						if(_strategy == kNNFlannKdTree || _strategy == kNNFlannNaive)
+						if(_strategy == kNNFlannKdTree)
 						{
-							w->getDescriptor().convertTo(descriptor, CV_32F);
+							descriptor = convertBinTo32F(w->getDescriptor());
 						}
 						else
 						{
@@ -471,13 +532,15 @@ void VWDictionary::update()
 				UTimer timer;
 				timer.start();
 
+				int dim = _visualWords.begin()->second->getDescriptor().cols;
 				int type;
 				if(_visualWords.begin()->second->getDescriptor().type() == CV_8U)
 				{
 					useDistanceL1_ = true;
-					if(_strategy == kNNFlannKdTree || _strategy == kNNFlannNaive)
+					if(_strategy == kNNFlannKdTree)
 					{
 						type = CV_32F;
+						dim *= 8;
 					}
 					else
 					{
@@ -488,7 +551,6 @@ void VWDictionary::update()
 				{
 					type = _visualWords.begin()->second->getDescriptor().type();
 				}
-				int dim = _visualWords.begin()->second->getDescriptor().cols;
 
 				UASSERT(type == CV_32F || type == CV_8U);
 				UASSERT(dim > 0);
@@ -501,9 +563,9 @@ void VWDictionary::update()
 					cv::Mat descriptor;
 					if(iter->second->getDescriptor().type() == CV_8U)
 					{
-						if(_strategy == kNNFlannKdTree || _strategy == kNNFlannNaive)
+						if(_strategy == kNNFlannKdTree)
 						{
-							iter->second->getDescriptor().convertTo(descriptor, CV_32F);
+							descriptor = convertBinTo32F(iter->second->getDescriptor());
 						}
 						else
 						{
@@ -515,8 +577,8 @@ void VWDictionary::update()
 						descriptor = iter->second->getDescriptor();
 					}
 
-					UASSERT(descriptor.cols == dim);
-					UASSERT(descriptor.type() == type);
+					UASSERT_MSG(descriptor.type() == type, uFormat("%d vs %d", descriptor.type(), type).c_str());
+					UASSERT_MSG(descriptor.cols == dim, uFormat("%d vs %d", descriptor.cols, dim).c_str());
 
 					descriptor.copyTo(_dataTree.row(i));
 					_mapIndexId.insert(_mapIndexId.end(), std::pair<int, int>(i, iter->second->id()));
@@ -587,12 +649,6 @@ void VWDictionary::clear(bool printWarningsIfNotEmpty)
 	_unusedWords.clear();
 	_flannIndex->release();
 	useDistanceL1_ = false;
-
-	if(!_incrementalDictionary)
-	{
-		// reload the fixed dictionary
-		this->setFixedDictionary(_dictionaryPath);
-	}
 }
 
 int VWDictionary::getNextId()
@@ -631,8 +687,9 @@ void VWDictionary::removeAllWordRef(int wordId, int signatureId)
 	}
 }
 
-std::list<int> VWDictionary::addNewWords(const cv::Mat & descriptorsIn,
-							   int signatureId)
+std::list<int> VWDictionary::addNewWords(
+		const cv::Mat & descriptorsIn,
+		int signatureId)
 {
 	UDEBUG("id=%d descriptors=%d", signatureId, descriptorsIn.rows);
 	UTimer timer;
@@ -674,9 +731,9 @@ std::list<int> VWDictionary::addNewWords(const cv::Mat & descriptorsIn,
 	if(descriptorsIn.type() == CV_8U)
 	{
 		useDistanceL1_ = true;
-		if(_strategy == kNNFlannKdTree || _strategy == kNNFlannNaive)
+		if(_strategy == kNNFlannKdTree)
 		{
-			descriptorsIn.convertTo(descriptors, CV_32F);
+			descriptors = convertBinTo32F(descriptorsIn);
 		}
 		else
 		{
@@ -1004,9 +1061,9 @@ std::vector<int> VWDictionary::findNN(const cv::Mat & queryIn) const
 		cv::Mat query;
 		if(queryIn.type() == CV_8U)
 		{
-			if(_strategy == kNNFlannKdTree || _strategy == kNNFlannNaive)
+			if(_strategy == kNNFlannKdTree)
 			{
-				queryIn.convertTo(query, CV_32F);
+				query = convertBinTo32F(queryIn);
 			}
 			else
 			{
@@ -1117,7 +1174,7 @@ std::vector<int> VWDictionary::findNN(const cv::Mat & queryIn) const
 
 		std::map<int, int> mapIndexIdNotIndexed;
 		std::vector<std::vector<cv::DMatch> > matchesNotIndexed;
-		if(_notIndexedWords.size())
+		if(!_notIndexedWords.empty())
 		{
 			cv::Mat dataNotIndexed = cv::Mat::zeros(_notIndexedWords.size(), query.cols, query.type());
 			unsigned int index = 0;
@@ -1129,9 +1186,9 @@ std::vector<int> VWDictionary::findNN(const cv::Mat & queryIn) const
 				cv::Mat descriptor;
 				if(vw->getDescriptor().type() == CV_8U)
 				{
-					if(_strategy == kNNFlannKdTree || _strategy == kNNFlannNaive)
+					if(_strategy == kNNFlannKdTree)
 					{
-						vw->getDescriptor().convertTo(descriptor, CV_32F);
+						descriptor = convertBinTo32F(vw->getDescriptor());
 					}
 					else
 					{
@@ -1142,12 +1199,10 @@ std::vector<int> VWDictionary::findNN(const cv::Mat & queryIn) const
 				{
 					descriptor = vw->getDescriptor();
 				}
-
 				UASSERT(vw != 0 && descriptor.cols == query.cols && descriptor.type() == query.type());
-				vw->getDescriptor().copyTo(dataNotIndexed.row(index));
+				descriptor.copyTo(dataNotIndexed.row(index));
 				mapIndexIdNotIndexed.insert(mapIndexIdNotIndexed.end(), std::pair<int,int>(index, vw->id()));
 			}
-
 			// Find nearest neighbor
 			ULOGGER_DEBUG("Searching in words not indexed...");
 			cv::BFMatcher matcher(query.type()==CV_8U?cv::NORM_HAMMING:useDistanceL1_?cv::NORM_L1:cv::NORM_L2SQR);

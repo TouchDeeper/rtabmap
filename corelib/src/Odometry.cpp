@@ -35,6 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap/core/odometry/OdometryORBSLAM2.h"
 #include "rtabmap/core/odometry/OdometryLOAM.h"
 #include "rtabmap/core/odometry/OdometryMSCKF.h"
+#include "rtabmap/core/odometry/OdometryVINS.h"
 #include "rtabmap/core/OdometryInfo.h"
 #include "rtabmap/core/util3d.h"
 #include "rtabmap/core/util3d_mapping.h"
@@ -64,20 +65,23 @@ Odometry * Odometry::create(Odometry::Type & type, const ParametersMap & paramet
 	Odometry * odometry = 0;
 	switch(type)
 	{
-	case Odometry::kTypeORBSLAM2:
-		odometry = new OdometryORBSLAM2(parameters);
+	case Odometry::kTypeF2M:
+		odometry = new OdometryF2M(parameters);
 		break;
-	case Odometry::kTypeDVO:
-		odometry = new OdometryDVO(parameters);
-		break;
-	case Odometry::kTypeViso2:
-		odometry = new OdometryViso2(parameters);
+	case Odometry::kTypeF2F:
+		odometry = new OdometryF2F(parameters);
 		break;
 	case Odometry::kTypeFovis:
 		odometry = new OdometryFovis(parameters);
 		break;
-	case Odometry::kTypeF2F:
-		odometry = new OdometryF2F(parameters);
+	case Odometry::kTypeViso2:
+		odometry = new OdometryViso2(parameters);
+		break;
+	case Odometry::kTypeDVO:
+		odometry = new OdometryDVO(parameters);
+		break;
+	case Odometry::kTypeORBSLAM2:
+		odometry = new OdometryORBSLAM2(parameters);
 		break;
 	case Odometry::kTypeOkvis:
 		odometry = new OdometryOkvis(parameters);
@@ -88,7 +92,11 @@ Odometry * Odometry::create(Odometry::Type & type, const ParametersMap & paramet
 	case Odometry::kTypeMSCKF:
 		odometry = new OdometryMSCKF(parameters);
 		break;
+	case Odometry::kTypeVINS:
+		odometry = new OdometryVINS(parameters);
+		break;
 	default:
+		UERROR("Unknown odometry type %d, using F2M instead...", (int)type);
 		odometry = new OdometryF2M(parameters);
 		type = Odometry::kTypeF2M;
 		break;
@@ -397,20 +405,27 @@ Transform Odometry::process(SensorData & data, const Transform & guessIn, Odomet
 	{
 		// Decimation of images with calibrations
 		SensorData decimatedData = data;
-		decimatedData.setImageRaw(util2d::decimate(decimatedData.imageRaw(), _imageDecimation));
-		decimatedData.setDepthOrRightRaw(util2d::decimate(decimatedData.depthOrRightRaw(), _imageDecimation));
+		cv::Mat rgbLeft = util2d::decimate(decimatedData.imageRaw(), _imageDecimation);
+		cv::Mat depthRight = util2d::decimate(decimatedData.depthOrRightRaw(), _imageDecimation);
 		std::vector<CameraModel> cameraModels = decimatedData.cameraModels();
 		for(unsigned int i=0; i<cameraModels.size(); ++i)
 		{
 			cameraModels[i] = cameraModels[i].scaled(1.0/double(_imageDecimation));
 		}
-		decimatedData.setCameraModels(cameraModels);
-		StereoCameraModel stereoModel = decimatedData.stereoCameraModel();
-		if(stereoModel.isValidForProjection())
+		if(!cameraModels.empty())
 		{
-			stereoModel.scale(1.0/double(_imageDecimation));
+			decimatedData.setRGBDImage(rgbLeft, depthRight, cameraModels);
 		}
-		decimatedData.setStereoCameraModel(stereoModel);
+		else
+		{
+			StereoCameraModel stereoModel = decimatedData.stereoCameraModel();
+			if(stereoModel.isValidForProjection())
+			{
+				stereoModel.scale(1.0/double(_imageDecimation));
+			}
+			decimatedData.setStereoImage(rgbLeft, depthRight, stereoModel);
+		}
+
 
 		// compute transform
 		t = this->computeTransform(decimatedData, guess, info);
@@ -449,6 +464,11 @@ Transform Odometry::process(SensorData & data, const Transform & guessIn, Odomet
 	else
 	{
 		t = this->computeTransform(data, guess, info);
+	}
+
+	if(data.imageRaw().empty() && data.laserScanRaw().isEmpty() && !data.imu().empty())
+	{
+		return Transform(); // Return null on IMU-only updates
 	}
 
 	if(info)
@@ -602,7 +622,7 @@ Transform Odometry::process(SensorData & data, const Transform & guessIn, Odomet
 
 		if(dt)
 		{
-			if(dt >=guessSmoothingDelay_/2.0 || particleFilters_.size() || _filteringStrategy==1)
+			if(dt >= (guessSmoothingDelay_/2.0) || particleFilters_.size() || _filteringStrategy==1)
 			{
 				velocityGuess_ = Transform(vx, vy, vz, vroll, vpitch, vyaw);
 				previousVelocities_.clear();

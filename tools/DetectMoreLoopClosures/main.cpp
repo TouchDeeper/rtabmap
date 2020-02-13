@@ -34,12 +34,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <rtabmap/utilite/UMath.h>
 #include <rtabmap/utilite/UTimer.h>
 #include <rtabmap/utilite/UFile.h>
+#include <rtabmap/utilite/UStl.h>
 #include <pcl/filters/filter.h>
 #include <pcl/io/ply_io.h>
 #include <pcl/io/obj_io.h>
 #include <pcl/common/common.h>
 #include <pcl/surface/poisson.h>
 #include <stdio.h>
+#include <signal.h>
 
 using namespace rtabmap;
 
@@ -53,8 +55,16 @@ void showUsage()
 			"    -i #          Iterations (default 1).\n"
 			"    --intra       Add only intra-session loop closures.\n"
 			"    --inter       Add only inter-session loop closures.\n"
-			"\n");
+			"\n%s", Parameters::showUsage());
 	exit(1);
+}
+
+// catch ctrl-c
+bool g_loopForever = true;
+void sighandler(int sig)
+{
+	printf("\nSignal %d caught...\n", sig);
+	g_loopForever = false;
 }
 
 class PrintProgressState : public ProgressState
@@ -64,12 +74,16 @@ public:
 	{
 		if(!msg.empty())
 			printf("%s \n", msg.c_str());
-		return true;
+		return g_loopForever;
 	}
 };
 
 int main(int argc, char * argv[])
 {
+	signal(SIGABRT, &sighandler);
+	signal(SIGTERM, &sighandler);
+	signal(SIGINT, &sighandler);
+
 	ULogger::setType(ULogger::kTypeConsole);
 	ULogger::setLevel(ULogger::kError);
 
@@ -85,7 +99,11 @@ int main(int argc, char * argv[])
 	bool interSession = false;
 	for(int i=1; i<argc-1; ++i)
 	{
-		if(std::strcmp(argv[i], "--intra") == 0)
+		if(std::strcmp(argv[i], "--help") == 0)
+		{
+			showUsage();
+		}
+		else if(std::strcmp(argv[i], "--intra") == 0)
 		{
 			intraSession = true;
 			if(interSession)
@@ -138,8 +156,13 @@ int main(int argc, char * argv[])
 			}
 		}
 	}
+	ParametersMap inputParams = Parameters::parseArguments(argc,  argv);
 
 	std::string dbPath = argv[argc-1];
+	if(!UFile::exists(dbPath))
+	{
+		printf("Database %s doesn't exist!\n", dbPath.c_str());
+	}
 
 	printf("\nDatabase: %s\n", dbPath.c_str());
 	printf("Cluster radius = %f m\n", clusterRadius);
@@ -176,6 +199,7 @@ int main(int argc, char * argv[])
 	// Get the global optimized map
 	Rtabmap rtabmap;
 	printf("Initialization...\n");
+	uInsert(parameters, inputParams);
 	rtabmap.init(parameters, dbPath);
 
 	PrintProgressState progress;
@@ -183,7 +207,14 @@ int main(int argc, char * argv[])
 	int detected = rtabmap.detectMoreLoopClosures(clusterRadius, clusterAngle, iterations, intraSession, interSession, &progress);
 	if(detected < 0)
 	{
-		printf("Loop closure detection failed!\n");
+		if(!g_loopForever)
+		{
+			printf("Detection interrupted. Loop closures found so far (if any) are not saved.\n");
+		}
+		else
+		{
+			printf("Loop closure detection failed!\n");
+		}
 	}
 
 	rtabmap.close();

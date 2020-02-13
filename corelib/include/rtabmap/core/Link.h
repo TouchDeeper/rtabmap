@@ -47,8 +47,10 @@ public:
 		kVirtualClosure,
 		kNeighborMerged,
 		kPosePrior, // Absolute pose in /world frame, From == To
-		kLandmark,  // Transform /base_link -­­> /landmark, "From" is node observing the landmark "To"
+		kLandmark,  // Transform /base_link -­­> /landmark, "From" is node observing the landmark "To" (landmark is negative id)
+		kGravity,  // Orientation of the base frame accordingly to gravity (From == To)
 		kEnd,
+		kSelfRefLink = 97, // Include kPosePrior and kGravity (all links where From=To)
 		kAllWithLandmarks = 98,
 		kAllWithoutLandmarks = 99,
 		kUndef = 99};
@@ -67,8 +69,8 @@ public:
 	const Transform & transform() const {return transform_;}
 	Type type() const {return type_;}
 	const cv::Mat & infMatrix() const {return infMatrix_;}
-	double rotVariance() const;
-	double transVariance() const;
+	double rotVariance(bool minimum = true) const;
+	double transVariance(bool minimum = true) const;
 
 	void setFrom(int from) {from_ = from;}
 	void setTo(int to) {to_ = to;}

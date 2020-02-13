@@ -32,6 +32,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "rtabmap/utilite/UTimer.h"
 #include "rtabmap/utilite/UStl.h"
 #include "rtabmap/utilite/UThread.h"
+#include "rtabmap/utilite/UFile.h"
+#include "rtabmap/utilite/UDirectory.h"
 #include <opencv2/imgproc/types_c.h>
 
 #ifdef RTABMAP_OKVIS
@@ -140,9 +142,10 @@ OdometryOkvis::OdometryOkvis(const ParametersMap & parameters) :
 {
 #ifdef RTABMAP_OKVIS
 	Parameters::parse(parameters, Parameters::kOdomOKVISConfigPath(), configFilename_);
-	if(configFilename_.empty())
+	configFilename_ = uReplaceChar(configFilename_, '~', UDirectory::homeDir());
+	if(configFilename_.empty() || !UFile::exists(configFilename_))
 	{
-		UERROR("OKVIS config file is empty (%s)!", Parameters::kOdomOKVISConfigPath().c_str());
+		UERROR("OKVIS config file is empty or doesn't exist (%s)!", Parameters::kOdomOKVISConfigPath().c_str());
 	}
 #endif
 }
@@ -191,7 +194,6 @@ Transform OdometryOkvis::computeTransform(
 
 	okvis::Time timeOkvis = okvis::Time(data.stamp());
 
-	bool imuUpdated = false;
 	if(!data.imu().empty())
 	{
 		UDEBUG("IMU update stamp=%f acc=%f %f %f gyr=%f %f %f", data.stamp(),
@@ -205,7 +207,7 @@ Transform OdometryOkvis::computeTransform(
 		{
 			Eigen::Vector3d acc(data.imu().linearAcceleration()[0], data.imu().linearAcceleration()[1], data.imu().linearAcceleration()[2]);
 			Eigen::Vector3d ang(data.imu().angularVelocity()[0], data.imu().angularVelocity()[1], data.imu().angularVelocity()[2]);
-			imuUpdated = okvisEstimator_->addImuMeasurement(timeOkvis, acc, ang);
+			okvisEstimator_->addImuMeasurement(timeOkvis, acc, ang);
 		}
 		else
 		{
@@ -214,7 +216,6 @@ Transform OdometryOkvis::computeTransform(
 		}
 	}
 
-	bool imageUpdated = false;
 	if(!data.imageRaw().empty())
 	{
 		UDEBUG("Image update stamp=%f", data.stamp());
@@ -270,6 +271,7 @@ Transform OdometryOkvis::computeTransform(
 			}
 		}
 
+		bool imageUpdated = false;
 		if(images.size())
 		{
 			// initialization
@@ -283,14 +285,14 @@ Transform OdometryOkvis::computeTransform(
 				}
 
 				okvis::VioParameters parameters;
-				if(configFilename_.empty())
+				if(configFilename_.empty() || !UFile::exists(configFilename_))
 				{
-					UERROR("OKVIS config file is empty (%s)!", Parameters::kOdomOKVISConfigPath().c_str());
+					UERROR("OKVIS config file is empty or doesn't exist (%s)!", Parameters::kOdomOKVISConfigPath().c_str());
 					return t;
 				}
 				else
 				{
-					okvis::VioParametersReader vio_parameters_reader(configFilename_);
+					okvis::VioParametersReader vio_parameters_reader(uReplaceChar(configFilename_, '~', UDirectory::homeDir()));
 					vio_parameters_reader.getParameters(parameters);
 					if(parameters.nCameraSystem.numCameras() > 0)
 					{
@@ -447,48 +449,45 @@ Transform OdometryOkvis::computeTransform(
 				++imagesProcessed_;
 			}
 		}
-	}
 
-	if((imageUpdated || imuUpdated) && imagesProcessed_ > 10)
-	{
-		Transform fixPos(-1,0,0,0, 0,-1,0,0, 0,0,1,0);
-		Transform fixRot(0,0,1,0, 0,-1,0,0, 1,0,0,0);
-		Transform p = okvisCallbackHandler_->getLastTransform();
-		if(!p.isNull())
+		if(imageUpdated && imagesProcessed_ > 10)
 		{
-			p = fixPos * p * fixRot;
-
-			if(this->getPose().rotation().isIdentity())
+			Transform fixPos(-1,0,0,0, 0,-1,0,0, 0,0,1,0);
+			Transform fixRot(0,0,1,0, 0,-1,0,0, 1,0,0,0);
+			Transform p = okvisCallbackHandler_->getLastTransform();
+			if(!p.isNull())
 			{
-				initGravity_ = true;
-				this->reset(this->getPose()*p.rotation());
-			}
+				p = fixPos * p * fixRot;
 
-			if(previousPose_.isIdentity())
-			{
-				previousPose_ = p;
-			}
-
-			// make it incremental
-			t = previousPose_.inverse()*p;
-			previousPose_ = p;
-
-			if(info)
-			{
-				info->reg.covariance = cv::Mat::eye(6,6, CV_64FC1);
-				info->reg.covariance *= this->framesProcessed() == 0?9999:0.0001;
-
-				// FIXME: the scale of landmarks doesn't seem to fit well the environment...
-				/*info->localMap = okvisCallbackHandler_->getLastLandmarks();
-				info->localMapSize = info->localMap.size();
-				for(std::map<int, cv::Point3f>::iterator iter=info->localMap.begin(); iter!=info->localMap.end(); ++iter)
+				if(this->getPose().rotation().isIdentity())
 				{
-					iter->second = util3d::transformPoint(iter->second, fixPos);
-				}*/
+					initGravity_ = true;
+					this->reset(this->getPose()*p.rotation());
+				}
+
+				if(previousPose_.isIdentity())
+				{
+					previousPose_ = p;
+				}
+
+				// make it incremental
+				t = previousPose_.inverse()*p;
+				previousPose_ = p;
+
+				if(info)
+				{
+					info->reg.covariance = cv::Mat::eye(6,6, CV_64FC1);
+					info->reg.covariance *= this->framesProcessed() == 0?9999:0.0001;
+
+					// FIXME: the scale of landmarks doesn't seem to fit well the environment...
+					/*info->localMap = okvisCallbackHandler_->getLastLandmarks();
+					info->localMapSize = info->localMap.size();
+					for(std::map<int, cv::Point3f>::iterator iter=info->localMap.begin(); iter!=info->localMap.end(); ++iter)
+					{
+						iter->second = util3d::transformPoint(iter->second, fixPos);
+					}*/
+				}
 			}
-		}
-		if(imageUpdated)
-		{
 			UINFO("Odom update time = %fs p=%s", timer.elapsed(), p.prettyPrint().c_str());
 		}
 	}

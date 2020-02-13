@@ -38,6 +38,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 #include <iomanip>
 #include "SimpleIni.h"
+#include <opencv2/core/version.hpp>
+#include <pcl/pcl_config.h>
+#ifndef DISABLE_VTK
+#include <vtkVersion.h>
+#endif
 
 namespace rtabmap
 {
@@ -175,6 +180,9 @@ rtabmap::ParametersMap Parameters::getDefaultOdometryParameters(bool stereo, boo
 			(icp && group.compare("Icp") == 0) ||
 			(vis && Parameters::isFeatureParameter(iter->first)) ||
 			group.compare("Reg") == 0 ||
+			group.compare("Optimizer") == 0 ||
+			group.compare("g2o") == 0 ||
+			group.compare("GTSAM") == 0 ||
 			(vis && group.compare("Vis") == 0) ||
 			iter->first.compare(kRtabmapPublishRAMUsage())==0)
 		{
@@ -228,6 +236,17 @@ const std::map<std::string, std::pair<bool, std::string> > & Parameters::getRemo
 	if(removedParameters_.empty())
 	{
 		// removed parameters
+
+		// 0.19.4
+		removedParameters_.insert(std::make_pair("RGBD/MaxLocalizationDistance", std::make_pair(true,  Parameters::kRGBDMaxLoopClosureDistance())));
+
+		// 0.19.3
+		removedParameters_.insert(std::make_pair("Aruco/Dictionary",             std::make_pair(true,  Parameters::kMarkerDictionary())));
+		removedParameters_.insert(std::make_pair("Aruco/MarkerLength",           std::make_pair(true,  Parameters::kMarkerLength())));
+		removedParameters_.insert(std::make_pair("Aruco/MaxDepthError",          std::make_pair(true,  Parameters::kMarkerMaxDepthError())));
+		removedParameters_.insert(std::make_pair("Aruco/VarianceLinear",         std::make_pair(true,  Parameters::kMarkerVarianceLinear())));
+		removedParameters_.insert(std::make_pair("Aruco/VarianceAngular",        std::make_pair(true,  Parameters::kMarkerVarianceAngular())));
+		removedParameters_.insert(std::make_pair("Aruco/CornerRefinementMethod", std::make_pair(true,  Parameters::kMarkerCornerRefinementMethod())));
 
 		// 0.17.5
 		removedParameters_.insert(std::make_pair("Grid/OctoMapOccupancyThr",     std::make_pair(true,  Parameters::kGridGlobalOccupancyThr())));
@@ -565,14 +584,36 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 
 				int spacing = 30;
 				std::cout << str << std::setw(spacing - str.size()) << RTABMAP_VERSION << std::endl;
-				str = "OpenCV:";
-#ifdef RTABMAP_OPENCV3
-				std::cout << str << std::setw(spacing - str.size()) << "3" << std::endl;
+				str = "PCL:";
+				std::cout << str << std::setw(spacing - str.size()) << PCL_VERSION_PRETTY << std::endl;
+				str = "With VTK:";
+#ifndef DISABLE_VTK
+				std::cout << str << std::setw(spacing - str.size()) << vtkVersion::GetVTKVersion() << std::endl;
 #else
-				std::cout << str << std::setw(spacing - str.size()) << "2" << std::endl;
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
 #endif
+				str = "OpenCV:";
+				std::cout << str << std::setw(spacing - str.size()) << CV_VERSION << std::endl;
 				str = "With OpenCV nonfree:";
 #ifdef RTABMAP_NONFREE
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With ORB OcTree:";
+#ifdef RTABMAP_ORB_OCTREE
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With FastCV:";
+#ifdef RTABMAP_FASTCV
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With Madgwick:";
+#ifdef RTABMAP_MADGWICK
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
@@ -603,6 +644,12 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 #endif
 				str = "With CVSBA:";
 #ifdef RTABMAP_CVSBA
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With Ceres:";
+#ifdef RTABMAP_CERES
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
@@ -691,6 +738,12 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
 #endif
+				str = "With Alice Vision:";
+#ifdef RTABMAP_ALICE_VISION
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
 				str = "With LOAM:";
 #ifdef RTABMAP_LOAM
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
@@ -729,6 +782,12 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 #endif
 				str = "With MSCKF_VIO:";
 #ifdef RTABMAP_MSCKF_VIO
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With VINS-Fusion:";
+#ifdef RTABMAP_VINS
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;

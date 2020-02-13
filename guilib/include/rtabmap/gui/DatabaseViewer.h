@@ -60,6 +60,7 @@ class CloudViewer;
 class OctoMap;
 class ExportCloudsDialog;
 class EditDepthArea;
+class EditMapArea;
 
 class RTABMAPGUI_EXP DatabaseViewer : public QMainWindow
 {
@@ -87,14 +88,17 @@ private Q_SLOTS:
 	void openDatabase();
 	bool closeDatabase();
 	void recoverDatabase();
+	void updateInfo();
 	void updateStatistics();
 	void selectObstacleColor();
 	void selectGroundColor();
 	void selectEmptyColor();
 	void editDepthImage();
 	void generateGraph();
+	void editSaved2DMap();
 	void exportSaved2DMap();
 	void import2DMap();
+	void regenerateSavedMap();
 	void viewOptimizedMesh();
 	void exportOptimizedMesh();
 	void updateOptimizedMesh();
@@ -128,6 +132,7 @@ private Q_SLOTS:
 	void sliderNeighborValueChanged(int);
 	void sliderLoopValueChanged(int);
 	void sliderIterationsValueChanged(int);
+	void editConstraint();
 	void updateGrid();
 	void updateOctomapView();
 	void updateGraphView();
@@ -160,6 +165,7 @@ private:
 				QLabel * labelVelocity,
 				QLabel * labelCalib,
 				QLabel * labelScan,
+				QLabel * labelGravity,
 				QLabel * labelGps,
 				QLabel * labelSensors,
 				bool updateConstraintView);
@@ -200,6 +206,7 @@ private:
 	QMap<int, int> idToIndex_;
 	QList<rtabmap::Link> neighborLinks_;
 	QList<rtabmap::Link> loopLinks_;
+	int lastSliderIndexBrowsed_;
 	rtabmap::DBDriver * dbDriver_;
 	QString pathDatabase_;
 	std::string databaseFileName_;
@@ -224,10 +231,17 @@ private:
 	ExportCloudsDialog * exportDialog_;
 	QDialog * editDepthDialog_;
 	EditDepthArea * editDepthArea_;
+	QDialog * editMapDialog_;
+	EditMapArea * editMapArea_;
 
 	bool savedMaximized_;
 	bool firstCall_;
 	QString iniFilePath_;
+
+	bool infoReducedGraph_;
+	double infoTotalOdom_;
+	double infoTotalTime_;
+	int infoSessions_;
 
 	bool useLastOptimizedGraphAsGuess_;
 	std::map<int, Transform> lastOptimizedGraph_;

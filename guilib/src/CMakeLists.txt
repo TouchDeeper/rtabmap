@@ -28,10 +28,12 @@ SET(headers_ui
 	../include/${PROJECT_PREFIX}/gui/CreateSimpleCalibrationDialog.h
 	../include/${PROJECT_PREFIX}/gui/ParametersToolBox.h
 	../include/${PROJECT_PREFIX}/gui/DepthCalibrationDialog.h
+	../include/${PROJECT_PREFIX}/gui/EditConstraintDialog.h
 	./3rdParty/QMultiComboBox.h
 	../include/${PROJECT_PREFIX}/gui/TexturingState.h
 	../include/${PROJECT_PREFIX}/gui/RecoveryState.h
 	../include/${PROJECT_PREFIX}/gui/EditDepthArea.h
+	../include/${PROJECT_PREFIX}/gui/EditMapArea.h
 )
 
 SET(uis
@@ -48,6 +50,7 @@ SET(uis
     ./ui/createSimpleCalibrationDialog.ui
     ./ui/depthCalibrationDialog.ui
     ./ui/exportBundlerDialog.ui
+    ./ui/editConstraintDialog.ui
 )
 
 SET(qrc 
@@ -95,9 +98,11 @@ SET(SRC_FILES
 	./ExportBundlerDialog.cpp
 	./PostProcessingDialog.cpp
 	./ExportCloudsDialog.cpp
+	./EditConstraintDialog.cpp
 	./MapVisibilityWidget.cpp
 	./GraphViewer.cpp
 	./EditDepthArea.cpp
+	./EditMapArea.cpp
 	./CreateSimpleCalibrationDialog.cpp
 	./ParametersToolBox.cpp
 	./DepthCalibrationDialog.cpp
@@ -126,6 +131,14 @@ SET(INCLUDE_DIRS
 	${CMAKE_CURRENT_BINARY_DIR} # for qt ui generated in binary dir
 	${PCL_INCLUDE_DIRS}
 )
+
+# Hack as CameraRealsense2.h needs realsense2 include dir
+IF(realsense2_FOUND)
+	SET(INCLUDE_DIRS
+		${INCLUDE_DIRS}
+		${realsense2_INCLUDE_DIRS}
+	)
+ENDIF(realsense2_FOUND)
 
 IF(QT4_FOUND)
     INCLUDE(${QT_USE_FILE})

@@ -1,8 +1,16 @@
 #!/bin/bash
 
 PWD=$(pwd)
-DATASET_ROOT_PATH='/root/datasets/euroc'
-EUROC_RESULTS_PATH='/root/results/euroc'
+DOCKER=1 # set to 0 to use host rtabmap tool and relative datasets to this script
+
+DATASET_ROOT_PATH='./datasets/euroc'
+EUROC_RESULTS_PATH='./results/euroc'
+mkdir -p $EUROC_RESULTS_PATH
+if [ $DOCKER -eq 1 ]
+then
+    DATASET_ROOT_PATH='/root/datasets/euroc'
+    EUROC_RESULTS_PATH='/root/results/euroc'
+fi
 
 LIST=( 'V1_01_easy' 'V1_02_medium' 'V1_03_difficult' 'V2_01_easy' 'V2_02_medium' 'V2_03_difficult' 'MH_01_easy' 'MH_02_easy' 'MH_03_medium' 'MH_04_difficult' 'MH_05_difficult')
 
@@ -25,7 +33,9 @@ echo "Usage: run_euroc_datasets.sh \"output name\" \"odom strategy: 0=f2m 1=f2f 
 exit
 fi
 
-F2F_params=""
+#uncomment for graph gravity optimization
+#F2F_params="--Optimizer/GravitySigma 0.01 --g2o/PixelVariance 5"
+
 if [ $STRATEGY -eq 11 ] # F2F optical flow
 then
     STRATEGY=1
@@ -47,7 +57,7 @@ fi
 if [ $STRATEGY -eq 66 ] # okvis raw images
 then
     STRATEGY=6
-    F2F_params="--raw $F2F_params"
+    F2F_params="--raw --Odom/GuessMotion false --OdomOKVIS/ConfigPath ./config_fpga_p2_euroc.yaml $F2F_params"
 fi
 if [ $STRATEGY -eq 6 ] # okvis
 then
@@ -57,29 +67,53 @@ fi
 if [ $STRATEGY -eq 88 ] # msckf_vio raw images
 then
     STRATEGY=8
-    F2F_params="--raw $F2F_params"
+    F2F_params="--raw --Odom/GuessMotion false $F2F_params"
 fi
 if [ $STRATEGY -eq 8 ] # msckf_vio
 then
     F2F_params="--Odom/GuessMotion false $F2F_params"
 fi
 
-# Select rtabmap built with os2 support or not
-TOOL_PREFIX="/usr/local/bin"
-if [ $STRATEGY -eq 5 ]
+if [ $STRATEGY -eq 99 ] # vins raw images
 then
-    TOOL_PREFIX="/root/rtabmap_os2/bin"
-elif [ $STRATEGY -eq 8 ]
-then
-    TOOL_PREFIX="/root/rtabmap_msckf/bin"
+    STRATEGY=9
+    F2F_params="--raw --Odom/GuessMotion false --OdomVINS/ConfigPath ./euroc_stereo_imu_config.yaml $F2F_params"
 fi
-RTABMAP_RGBD_TOOL="docker run -v $PWD/datasets/euroc:$DATASET_ROOT_PATH -v $PWD/results/euroc:$EUROC_RESULTS_PATH -i -t --rm introlab3it/rtabmap:jfr2018 $TOOL_PREFIX/rtabmap-euroc_dataset"
-if [ $STRATEGY -eq 6 ]
+if [ $STRATEGY -eq 9 ] # vins
 then
-    xhost +
-    RTABMAP_RGBD_TOOL="docker run -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -v $PWD/datasets/euroc:$DATASET_ROOT_PATH -v $PWD/results/euroc:$EUROC_RESULTS_PATH -i -t --rm introlab3it/rtabmap:jfr2018 $TOOL_PREFIX/rtabmap-euroc_dataset"
+    F2F_params="--Odom/GuessMotion false --OdomVINS/ConfigPath ./euroc_stereo_imu_config.yaml $F2F_params"
 fi
-echo $RTABMAP_RGBD_TOOL
+
+if [ $STRATEGY -eq 100 ] # vins (stereo-only) raw images
+then
+    STRATEGY=9
+    F2F_params="--raw --Odom/GuessMotion false --OdomVINS/ConfigPath ./euroc_stereo_config.yaml $F2F_params"
+fi
+if [ $STRATEGY -eq 10 ] # vins (stereo-only)
+then
+    F2F_params="--Odom/GuessMotion false --OdomVINS/ConfigPath ./euroc_stereo_config.yaml $F2F_params"
+fi
+
+RTABMAP_EUROC_TOOL="rtabmap-euroc_dataset"
+if [ $DOCKER -eq 1 ]
+then
+    # Select rtabmap built with os2 support or not
+    TOOL_PREFIX="/usr/local/bin"
+    if [ $STRATEGY -eq 5 ]
+    then
+        TOOL_PREFIX="/root/rtabmap_os2/bin"
+    elif [ $STRATEGY -eq 8 ]
+    then
+        TOOL_PREFIX="/root/rtabmap_msckf/bin"
+    fi
+    RTABMAP_EUROC_TOOL="docker run -v $PWD/datasets/euroc:$DATASET_ROOT_PATH -v $PWD/results/euroc:$EUROC_RESULTS_PATH -i -t --rm introlab3it/rtabmap:jfr2018 $TOOL_PREFIX/rtabmap-euroc_dataset"
+    if [ $STRATEGY -eq 6 ]
+    then
+        xhost +
+        RTABMAP_EUROC_TOOL="docker run -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix -v $PWD/datasets/euroc:$DATASET_ROOT_PATH -v $PWD/results/euroc:$EUROC_RESULTS_PATH -i -t --rm introlab3it/rtabmap:jfr2018 $TOOL_PREFIX/rtabmap-euroc_dataset"
+    fi
+fi
+echo $RTABMAP_EUROC_TOOL
 
 for d in "${LIST[@]}"
 do
@@ -92,7 +126,7 @@ do
        fi
     fi
 
-    taskset 0x1 $RTABMAP_RGBD_TOOL \
+    taskset 0x1 $RTABMAP_EUROC_TOOL \
        --Rtabmap/PublishRAMUsage true\
        --RGBD/LinearUpdate 0\
        --RGBD/AngularUpdate 0\

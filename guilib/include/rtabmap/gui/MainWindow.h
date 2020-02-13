@@ -174,6 +174,7 @@ protected Q_SLOTS:
 	void selectK4W2();
 	void selectRealSense();
 	void selectRealSense2();
+	void selectRealSense2Stereo();
 	void selectStereoDC1394();
 	void selectStereoFlyCapture2();
 	void selectStereoZed();
@@ -297,6 +298,9 @@ protected:
 	void setNewDatabasePathOutput(const QString & newDatabasePathOutput) {_newDatabasePathOutput = newDatabasePathOutput;}
 	const QString & newDatabasePathOutput() const { return _newDatabasePathOutput; }
 
+	virtual ParametersMap getCustomParameters() {return ParametersMap();}
+	virtual Camera* createCamera();
+
 private:
 	Ui_mainWindow * _ui;
 
@@ -371,7 +375,7 @@ private:
 	LoopClosureViewer * _loopClosureViewer;
 
 	QString _graphSavingFileName;
-	bool _exportPosesFrame;
+	int _exportPosesFrame;
 	QMap<int, QString> _exportPosesFileName;
 	bool _autoScreenCaptureOdomSync;
 	bool _autoScreenCaptureRAM;

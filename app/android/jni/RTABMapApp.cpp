@@ -100,24 +100,28 @@ rtabmap::ParametersMap RTABMapApp::getRtabmapParameters()
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kRGBDProximityBySpace(), std::string("false"))); // just keep loop closure detection
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kRGBDLinearUpdate(), std::string("0.05")));
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kRGBDAngularUpdate(), std::string("0.05")));
-	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kArucoMarkerLength(), std::string("0.0")));
+	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kMarkerLength(), std::string("0.0")));
 
+	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kMemUseOdomGravity(), "true"));
 	if(parameters.find(rtabmap::Parameters::kOptimizerStrategy()) != parameters.end())
 	{
 		if(parameters.at(rtabmap::Parameters::kOptimizerStrategy()).compare("2") == 0) // GTSAM
 		{
 			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerEpsilon(), "0.00001"));
 			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerIterations(), graphOptimization_?"10":"0"));
+			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerGravitySigma(), "0.2"));
 		}
 		else if(parameters.at(rtabmap::Parameters::kOptimizerStrategy()).compare("1") == 0) // g2o
 		{
 			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerEpsilon(), "0.0"));
 			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerIterations(), graphOptimization_?"10":"0"));
+			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerGravitySigma(), "0"));
 		}
 		else // TORO
 		{
 			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerEpsilon(), "0.00001"));
 			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerIterations(), graphOptimization_?"100":"0"));
+			parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kOptimizerGravitySigma(), "0"));
 		}
 	}
 
@@ -127,7 +131,7 @@ rtabmap::ParametersMap RTABMapApp::getRtabmapParameters()
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kIcpEpsilon(), std::string("0.001")));
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kIcpMaxRotation(), std::string("0.17"))); // 10 degrees
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kIcpMaxTranslation(), std::string("0.05")));
-	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kIcpCorrespondenceRatio(), std::string("0.5")));
+	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kIcpCorrespondenceRatio(), std::string("0.49")));
 	parameters.insert(rtabmap::ParametersPair(rtabmap::Parameters::kIcpMaxCorrespondenceDistance(), std::string("0.05")));
 
 	parameters.insert(*rtabmap::Parameters::getDefaultParameters().find(rtabmap::Parameters::kKpMaxFeatures()));
@@ -1139,9 +1143,14 @@ int RTABMapApp::Render()
 				int fastMovement = (int)uValue(stats.data(), rtabmap::Statistics::kMemoryFast_movement(), 0.0f);
 				int loopClosure = (int)uValue(stats.data(), rtabmap::Statistics::kLoopAccepted_hypothesis_id(), 0.0f);
 				int rejected = (int)uValue(stats.data(), rtabmap::Statistics::kLoopRejectedHypothesis(), 0.0f);
+				int landmark = (int)uValue(stats.data(), rtabmap::Statistics::kLoopLandmark_detected(), 0.0f);
 				if(!paused_ && loopClosure>0)
 				{
 					main_scene_.setBackgroundColor(0, 0.5f, 0); // green
+				}
+				else if(!paused_ && landmark!=0)
+				{
+					main_scene_.setBackgroundColor(1, 0.65f, 0); // orange
 				}
 				else if(!paused_ && rejected>0)
 				{
@@ -1353,9 +1362,14 @@ int RTABMapApp::Render()
 
 						int loopClosure = (int)uValue(stats.data(), rtabmap::Statistics::kLoopAccepted_hypothesis_id(), 0.0f);
 						int rejected = (int)uValue(stats.data(), rtabmap::Statistics::kLoopRejectedHypothesis(), 0.0f);
+						int landmark = (int)uValue(stats.data(), rtabmap::Statistics::kLoopLandmark_detected(), 0.0f);
 						if(!paused_ && loopClosure>0)
 						{
 							main_scene_.setBackgroundColor(0, 0.5f, 0); // green
+						}
+						else if(!paused_ && landmark!=0)
+						{
+							main_scene_.setBackgroundColor(1, 0.65f, 0); // orange
 						}
 						else if(!paused_ && rejected>0)
 						{

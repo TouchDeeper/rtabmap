@@ -52,7 +52,8 @@ public:
 		kTypeORBSLAM2 = 5,
 		kTypeOkvis = 6,
 		kTypeLOAM = 7,
-		kTypeMSCKF = 8
+		kTypeMSCKF = 8,
+		kTypeVINS = 9
 	};
 
 public:
@@ -66,6 +67,7 @@ public:
 	virtual void reset(const Transform & initialPose = Transform::getIdentity());
 	virtual Odometry::Type getType() = 0;
 	virtual bool canProcessRawImages() const {return false;}
+	virtual bool canProcessIMU() const {return false;}
 
 	//getters
 	const Transform & getPose() const {return _pose;}
