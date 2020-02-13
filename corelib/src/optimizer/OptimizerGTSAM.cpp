@@ -168,18 +168,17 @@ std::map<int, Transform> OptimizerGTSAM::optimize(
 				{
 					// check if it is SE2 or only PointXY
 					std::multimap<int, Link>::const_iterator jter=edgeConstraints.find(iter->first);
-					if(jter != edgeConstraints.end())
+					UASSERT_MSG(jter != edgeConstraints.end(), uFormat("Not found landmark %d in edges!", iter->first).c_str());
+
+					if (1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
 					{
-						if (1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
-						{
-							initialEstimate.insert(iter->first, gtsam::Point2(iter->second.x(), iter->second.y()));
-							isLandmarkWithRotation.insert(std::make_pair(iter->first, false));
-						}
-						else
-						{
-							initialEstimate.insert(iter->first, gtsam::Pose2(iter->second.x(), iter->second.y(), iter->second.theta()));
-							isLandmarkWithRotation.insert(std::make_pair(iter->first, true));
-						}
+						initialEstimate.insert(iter->first, gtsam::Point2(iter->second.x(), iter->second.y()));
+						isLandmarkWithRotation.insert(std::make_pair(iter->first, false));
+					}
+					else
+					{
+						initialEstimate.insert(iter->first, gtsam::Pose2(iter->second.x(), iter->second.y(), iter->second.theta()));
+						isLandmarkWithRotation.insert(std::make_pair(iter->first, true));
 					}
 				}
 
@@ -194,20 +193,19 @@ std::map<int, Transform> OptimizerGTSAM::optimize(
 				{
 					// check if it is SE3 or only PointXYZ
 					std::multimap<int, Link>::const_iterator jter=edgeConstraints.find(iter->first);
-					if(jter != edgeConstraints.end())
+					UASSERT_MSG(jter != edgeConstraints.end(), uFormat("Not found landmark %d in edges!", iter->first).c_str());
+
+					if (1 / static_cast<double>(jter->second.infMatrix().at<double>(3,3)) >= 9999.0 ||
+						1 / static_cast<double>(jter->second.infMatrix().at<double>(4,4)) >= 9999.0 ||
+						1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
 					{
-						if (1 / static_cast<double>(jter->second.infMatrix().at<double>(3,3)) >= 9999.0 ||
-							1 / static_cast<double>(jter->second.infMatrix().at<double>(4,4)) >= 9999.0 ||
-							1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
-						{
-							initialEstimate.insert(iter->first, gtsam::Point3(iter->second.x(), iter->second.y(), iter->second.z()));
-							isLandmarkWithRotation.insert(std::make_pair(iter->first, false));
-						}
-						else
-						{
-							initialEstimate.insert(iter->first, gtsam::Pose3(iter->second.toEigen4d()));
-							isLandmarkWithRotation.insert(std::make_pair(iter->first, true));
-						}
+						initialEstimate.insert(iter->first, gtsam::Point3(iter->second.x(), iter->second.y(), iter->second.z()));
+						isLandmarkWithRotation.insert(std::make_pair(iter->first, false));
+					}
+					else
+					{
+						initialEstimate.insert(iter->first, gtsam::Pose3(iter->second.toEigen4d()));
+						isLandmarkWithRotation.insert(std::make_pair(iter->first, true));
 					}
 				}
 			}
@@ -284,7 +282,7 @@ std::map<int, Transform> OptimizerGTSAM::optimize(
 						}
 					}
 				}
-				else if(!isSlam2d() && gravitySigma() > 0 && iter->second.type() == Link::kPoseOdom && poses.find(iter->first) != poses.end())
+				else if(!isSlam2d() && gravitySigma() > 0 && iter->second.type() == Link::kGravity && poses.find(iter->first) != poses.end())
 				{
 					Vector3 r = gtsam::Pose3(iter->second.transform().toEigen4d()).rotation().xyz();
 					gtsam::Unit3 nG = gtsam::Rot3::RzRyRx(r.x(), r.y(), 0).rotate(gtsam::Unit3(0,0,-1));
@@ -378,13 +376,12 @@ std::map<int, Transform> OptimizerGTSAM::optimize(
 					}
 				}
 			}
-			else
+			else // id1 != id2
 			{
 #ifdef RTABMAP_VERTIGO
 				if(this->isRobust() &&
 				   iter->second.type() != Link::kNeighbor &&
-				   iter->second.type() != Link::kNeighborMerged &&
-				   iter->second.type() != Link::kPosePrior)
+				   iter->second.type() != Link::kNeighborMerged)
 				{
 					// create new switch variable
 					// Sunderhauf IROS 2012:
@@ -453,8 +450,7 @@ std::map<int, Transform> OptimizerGTSAM::optimize(
 #ifdef RTABMAP_VERTIGO
 					if(this->isRobust() &&
 					   iter->second.type() != Link::kNeighbor &&
-					   iter->second.type() != Link::kNeighborMerged &&
-					   iter->second.type() != Link::kPosePrior)
+					   iter->second.type() != Link::kNeighborMerged)
 					{
 						// create switchable edge factor
 						graph.add(vertigo::BetweenFactorSwitchableLinear<gtsam::Pose3>(id1, id2, gtsam::Symbol('s', switchCounter++), gtsam::Pose3(iter->second.transform().toEigen4d()), model));
@@ -519,8 +515,9 @@ std::map<int, Transform> OptimizerGTSAM::optimize(
 							{
 								if(isLandmarkWithRotation.at(key))
 								{
+									poses.at(key).getTranslationAndEulerAngles(x,y,z,roll,pitch,yaw);
 									gtsam::Pose2 p = iter->value.cast<gtsam::Pose2>();
-									tmpPoses.insert(std::make_pair(key, Transform(p.x(), p.y(), p.theta())));
+									tmpPoses.insert(std::make_pair(key, Transform(p.x(), p.y(), z, roll, pitch, p.theta())));
 								}
 								else
 								{
@@ -621,8 +618,9 @@ std::map<int, Transform> OptimizerGTSAM::optimize(
 					{
 						if(isLandmarkWithRotation.at(key))
 						{
+							poses.at(key).getTranslationAndEulerAngles(x,y,z,roll,pitch,yaw);
 							gtsam::Pose2 p = iter->value.cast<gtsam::Pose2>();
-							optimizedPoses.insert(std::make_pair(key, Transform(p.x(), p.y(), p.theta())));
+							optimizedPoses.insert(std::make_pair(key, Transform(p.x(), p.y(), z, roll, pitch, p.theta())));
 						}
 						else
 						{

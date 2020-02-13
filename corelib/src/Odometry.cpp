@@ -466,6 +466,11 @@ Transform Odometry::process(SensorData & data, const Transform & guessIn, Odomet
 		t = this->computeTransform(data, guess, info);
 	}
 
+	if(data.imageRaw().empty() && data.laserScanRaw().isEmpty() && !data.imu().empty())
+	{
+		return Transform(); // Return null on IMU-only updates
+	}
+
 	if(info)
 	{
 		info->timeEstimation = time.ticks();
@@ -617,7 +622,7 @@ Transform Odometry::process(SensorData & data, const Transform & guessIn, Odomet
 
 		if(dt)
 		{
-			if(dt >=guessSmoothingDelay_/2.0 || particleFilters_.size() || _filteringStrategy==1)
+			if(dt >= (guessSmoothingDelay_/2.0) || particleFilters_.size() || _filteringStrategy==1)
 			{
 				velocityGuess_ = Transform(vx, vy, vz, vroll, vpitch, vyaw);
 				previousVelocities_.clear();

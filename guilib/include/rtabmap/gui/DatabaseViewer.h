@@ -132,6 +132,7 @@ private Q_SLOTS:
 	void sliderNeighborValueChanged(int);
 	void sliderLoopValueChanged(int);
 	void sliderIterationsValueChanged(int);
+	void editConstraint();
 	void updateGrid();
 	void updateOctomapView();
 	void updateGraphView();
@@ -164,6 +165,7 @@ private:
 				QLabel * labelVelocity,
 				QLabel * labelCalib,
 				QLabel * labelScan,
+				QLabel * labelGravity,
 				QLabel * labelGps,
 				QLabel * labelSensors,
 				bool updateConstraintView);
@@ -240,8 +242,6 @@ private:
 	double infoTotalOdom_;
 	double infoTotalTime_;
 	int infoSessions_;
-	int infoBadcountInLTM_;
-	int infoBadCountInGraph_;
 
 	bool useLastOptimizedGraphAsGuess_;
 	std::map<int, Transform> lastOptimizedGraph_;

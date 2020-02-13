@@ -48,7 +48,7 @@ namespace rtabmap {
 		public: \
 			Dummy##PREFIX##NAME() {if(!_defaultDataInitialized)_defaultData.insert(std::pair<std::string, float>(#PREFIX "/" #NAME "/" #UNIT, 0.0f));} \
 		}; \
-		Dummy##PREFIX##NAME dummy##PREFIX##NAME;
+		Dummy##PREFIX##NAME dummy##PREFIX##NAME
 
 class RTABMAP_EXP Statistics
 {
@@ -71,6 +71,12 @@ class RTABMAP_EXP Statistics
 	RTABMAP_STATS(Loop, Angular_variance,);
 	RTABMAP_STATS(Loop, Landmark_detected,);
 	RTABMAP_STATS(Loop, Landmark_detected_node_ref,);
+	RTABMAP_STATS(Loop, Visual_inliers_mean_dist,m);
+	RTABMAP_STATS(Loop, Visual_inliers_distribution,);
+	RTABMAP_STATS(Loop, Map_correction_norm, m);
+	RTABMAP_STATS(Loop, Map_correction_roll, deg);
+	RTABMAP_STATS(Loop, Map_correction_pitch, deg);
+	RTABMAP_STATS(Loop, Map_correction_yaw, deg);
 
 	RTABMAP_STATS(Proximity, Time_detections,);
 	RTABMAP_STATS(Proximity, Space_last_detection_id,);
@@ -165,6 +171,8 @@ class RTABMAP_EXP Statistics
 	RTABMAP_STATS(Gt, Rotational_std, deg);
 	RTABMAP_STATS(Gt, Rotational_min, deg);
 	RTABMAP_STATS(Gt, Rotational_max, deg);
+	RTABMAP_STATS(Gt, Localization_linear_error, m);
+	RTABMAP_STATS(Gt, Localization_angular_error, deg);
 
 public:
 	static const std::map<std::string, float> & defaultData();

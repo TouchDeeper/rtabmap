@@ -84,7 +84,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QtCore/QTimer>
 #include <QtCore/QTime>
 #include <QActionGroup>
-#include <QtCore/QThread>
 #include <QtGui/QDesktopServices>
 #include <QtCore/QStringList>
 #include <QtCore/QProcess>
@@ -434,6 +433,7 @@ MainWindow::MainWindow(PreferencesDialog * prefDialog, QWidget * parent, bool sh
 	connect(_ui->actionKinect_for_Windows_SDK_v2, SIGNAL(triggered()), this, SLOT(selectK4W2()));
 	connect(_ui->actionRealSense_R200, SIGNAL(triggered()), this, SLOT(selectRealSense()));
 	connect(_ui->actionRealSense_ZR300, SIGNAL(triggered()), this, SLOT(selectRealSense()));
+	connect(_ui->actionRealSense2_SR300, SIGNAL(triggered()), this, SLOT(selectRealSense2()));
 	connect(_ui->actionRealSense2_D415, SIGNAL(triggered()), this, SLOT(selectRealSense2()));
 	connect(_ui->actionRealSense2_D435, SIGNAL(triggered()), this, SLOT(selectRealSense2()));
 	connect(_ui->actionStereoDC1394, SIGNAL(triggered()), this, SLOT(selectStereoDC1394()));
@@ -441,6 +441,7 @@ MainWindow::MainWindow(PreferencesDialog * prefDialog, QWidget * parent, bool sh
 	connect(_ui->actionStereoZed, SIGNAL(triggered()), this, SLOT(selectStereoZed()));
      connect(_ui->actionStereoTara, SIGNAL(triggered()), this, SLOT(selectStereoTara()));
 	connect(_ui->actionStereoUsb, SIGNAL(triggered()), this, SLOT(selectStereoUsb()));
+	connect(_ui->actionRealSense2_T265, SIGNAL(triggered()), this, SLOT(selectRealSense2Stereo()));
 	_ui->actionFreenect->setEnabled(CameraFreenect::available());
 	_ui->actionOpenNI_CV->setEnabled(CameraOpenNICV::available());
 	_ui->actionOpenNI_CV_ASUS->setEnabled(CameraOpenNICV::available());
@@ -451,8 +452,10 @@ MainWindow::MainWindow(PreferencesDialog * prefDialog, QWidget * parent, bool sh
 	_ui->actionKinect_for_Windows_SDK_v2->setEnabled(CameraK4W2::available());
 	_ui->actionRealSense_R200->setEnabled(CameraRealSense::available());
 	_ui->actionRealSense_ZR300->setEnabled(CameraRealSense::available());
+	_ui->actionRealSense2_SR300->setEnabled(CameraRealSense2::available());
 	_ui->actionRealSense2_D415->setEnabled(CameraRealSense2::available());
 	_ui->actionRealSense2_D435->setEnabled(CameraRealSense2::available());
+	_ui->actionRealSense2_T265->setEnabled(CameraRealSense2::available());
 	_ui->actionStereoDC1394->setEnabled(CameraStereoDC1394::available());
 	_ui->actionStereoFlyCapture2->setEnabled(CameraStereoFlyCapture2::available());
 	_ui->actionStereoZed->setEnabled(CameraStereoZed::available());
@@ -583,6 +586,8 @@ MainWindow::MainWindow(PreferencesDialog * prefDialog, QWidget * parent, bool sh
 	_ui->statsToolBox->updateStat("Odometry/Matches/", false);
 	_ui->statsToolBox->updateStat("Odometry/MatchesRatio/", false);
 	_ui->statsToolBox->updateStat("Odometry/Inliers/", false);
+	_ui->statsToolBox->updateStat("Odometry/InliersMeanDistance/m", false);
+	_ui->statsToolBox->updateStat("Odometry/InliersDistribution/", false);
 	_ui->statsToolBox->updateStat("Odometry/InliersRatio/", false);
 	_ui->statsToolBox->updateStat("Odometry/ICPInliersRatio/", false);
 	_ui->statsToolBox->updateStat("Odometry/ICPRotation/rad", false);
@@ -799,7 +804,12 @@ void MainWindow::closeEvent(QCloseEvent* event)
 
 bool MainWindow::handleEvent(UEvent* anEvent)
 {
-	if(anEvent->getClassName().compare("RtabmapEvent") == 0)
+	if(anEvent->getClassName().compare("IMUEvent") == 0)
+	{
+		// IMU events are published at high frequency, early exit
+		return false;
+	}
+	else if(anEvent->getClassName().compare("RtabmapEvent") == 0)
 	{
 		RtabmapEvent * rtabmapEvent = (RtabmapEvent*)anEvent;
 		Statistics stats = rtabmapEvent->getStats();
@@ -1018,6 +1028,8 @@ void MainWindow::processOdometry(const rtabmap::OdometryEvent & odom, bool dataI
 		bool cloudUpdated = false;
 		bool scanUpdated = false;
 		bool featuresUpdated = false;
+		bool filteredGravityUpdated = false;
+		bool accelerationUpdated = false;
 		if(!pose.isNull())
 		{
 			// 3d cloud
@@ -1257,6 +1269,33 @@ void MainWindow::processOdometry(const rtabmap::OdometryEvent & odom, bool dataI
 						}
 					}
 				}
+
+				if(  _preferencesDialog->isIMUGravityShown(1) &&
+					(odom.data().imu().orientation().val[0]!=0 ||
+					odom.data().imu().orientation().val[1]!=0 ||
+					odom.data().imu().orientation().val[2]!=0 ||
+					odom.data().imu().orientation().val[3]!=0))
+				{
+					Eigen::Vector3f gravity(0,0,-_preferencesDialog->getIMUGravityLength(1));
+					Transform orientation(0,0,0, odom.data().imu().orientation()[0], odom.data().imu().orientation()[1], odom.data().imu().orientation()[2], odom.data().imu().orientation()[3]);
+					gravity = (orientation* odom.data().imu().localTransform().inverse()*(_odometryCorrection*pose).rotation().inverse()).toEigen3f()*gravity;
+					_cloudViewer->addOrUpdateLine("odom_imu_orientation", _odometryCorrection*pose, (_odometryCorrection*pose).translation()*Transform(gravity[0], gravity[1], gravity[2], 0, 0, 0)*pose.rotation().inverse(), Qt::yellow, true, true);
+					filteredGravityUpdated = true;
+				}
+				if( _preferencesDialog->isIMUAccShown() &&
+					(odom.data().imu().linearAcceleration().val[0]!=0 ||
+					odom.data().imu().linearAcceleration().val[1]!=0 ||
+					odom.data().imu().linearAcceleration().val[2]!=0))
+				{
+					Eigen::Vector3f gravity(
+							-odom.data().imu().linearAcceleration().val[0],
+							-odom.data().imu().linearAcceleration().val[1],
+							-odom.data().imu().linearAcceleration().val[2]);
+					gravity = gravity.normalized() * _preferencesDialog->getIMUGravityLength(1);
+					gravity = odom.data().imu().localTransform().toEigen3f()*gravity;
+					_cloudViewer->addOrUpdateLine("odom_imu_acc", _odometryCorrection*pose, _odometryCorrection*pose*Transform(gravity[0], gravity[1], gravity[2], 0, 0, 0), Qt::red, true, true);
+					accelerationUpdated = true;
+				}
 			}
 		}
 		if(!dataIgnored)
@@ -1276,6 +1315,14 @@ void MainWindow::processOdometry(const rtabmap::OdometryEvent & odom, bool dataI
 			if(!featuresUpdated && _cloudViewer->getAddedClouds().contains("featuresOdom"))
 			{
 				_cloudViewer->setCloudVisibility("featuresOdom", false);
+			}
+			if(!filteredGravityUpdated && _cloudViewer->getAddedLines().find("odom_imu_orientation") != _cloudViewer->getAddedLines().end())
+			{
+				_cloudViewer->removeLine("odom_imu_orientation");
+			}
+			if(!accelerationUpdated && _cloudViewer->getAddedLines().find("odom_imu_acc") != _cloudViewer->getAddedLines().end())
+			{
+				_cloudViewer->removeLine("odom_imu_acc");
 			}
 		}
 	}
@@ -1336,7 +1383,8 @@ void MainWindow::processOdometry(const rtabmap::OdometryEvent & odom, bool dataI
 			else if(odom.info().type == (int)Odometry::kTypeF2F ||
 					odom.info().type == (int)Odometry::kTypeViso2 ||
 					odom.info().type == (int)Odometry::kTypeFovis ||
-					odom.info().type == (int)Odometry::kTypeMSCKF)
+					odom.info().type == (int)Odometry::kTypeMSCKF ||
+					odom.info().type == (int)Odometry::kTypeVINS)
 			{
 				std::vector<cv::KeyPoint> kpts;
 				cv::KeyPoint::convert(odom.info().newCorners, kpts, 7);
@@ -1384,7 +1432,8 @@ void MainWindow::processOdometry(const rtabmap::OdometryEvent & odom, bool dataI
 
 			if( odom.info().type == (int)Odometry::kTypeF2M ||
 				odom.info().type == (int)Odometry::kTypeORBSLAM2 ||
-				odom.info().type == (int)Odometry::kTypeMSCKF)
+				odom.info().type == (int)Odometry::kTypeMSCKF ||
+				odom.info().type == (int)Odometry::kTypeVINS)
 			{
 				if(_ui->imageView_odometry->isFeaturesShown() && !_preferencesDialog->isOdomOnlyInliersShown())
 				{
@@ -1441,6 +1490,8 @@ void MainWindow::processOdometry(const rtabmap::OdometryEvent & odom, bool dataI
 
 	//Process info
 	_ui->statsToolBox->updateStat("Odometry/Inliers/", _preferencesDialog->isTimeUsedInFigures()?odom.data().stamp()-_firstStamp:(float)odom.data().id(), (float)odom.info().reg.inliers, _preferencesDialog->isCacheSavedInFigures());
+	_ui->statsToolBox->updateStat("Odometry/InliersMeanDistance/m", _preferencesDialog->isTimeUsedInFigures()?odom.data().stamp()-_firstStamp:(float)odom.data().id(), (float)odom.info().reg.inliersMeanDistance, _preferencesDialog->isCacheSavedInFigures());
+	_ui->statsToolBox->updateStat("Odometry/InliersDistribution/", _preferencesDialog->isTimeUsedInFigures()?odom.data().stamp()-_firstStamp:(float)odom.data().id(), (float)odom.info().reg.inliersDistribution, _preferencesDialog->isCacheSavedInFigures());
 	_ui->statsToolBox->updateStat("Odometry/InliersRatio/", _preferencesDialog->isTimeUsedInFigures()?odom.data().stamp()-_firstStamp:(float)odom.data().id(), odom.info().features<=0?0.0f:float(odom.info().reg.inliers)/float(odom.info().features), _preferencesDialog->isCacheSavedInFigures());
 	_ui->statsToolBox->updateStat("Odometry/ICPInliersRatio/", _preferencesDialog->isTimeUsedInFigures()?odom.data().stamp()-_firstStamp:(float)odom.data().id(), (float)odom.info().reg.icpInliersRatio, _preferencesDialog->isCacheSavedInFigures());
 	_ui->statsToolBox->updateStat("Odometry/ICPRotation/rad", _preferencesDialog->isTimeUsedInFigures()?odom.data().stamp()-_firstStamp:(float)odom.data().id(), (float)odom.info().reg.icpRotation, _preferencesDialog->isCacheSavedInFigures());
@@ -1919,7 +1970,8 @@ void MainWindow::processStats(const rtabmap::Statistics & stat)
 			std::map<int, std::string> labels = _currentLabels;
 
 			mapIds.insert(std::make_pair(stat.getLastSignatureData().id(), stat.getLastSignatureData().mapId()));
-			if(!stat.getLastSignatureData().getGroundTruthPose().isNull())
+			if(!stat.getLastSignatureData().getGroundTruthPose().isNull() &&
+				_cachedSignatures.contains(stat.getLastSignatureData().id()))
 			{
 				groundTruth.insert(std::make_pair(stat.getLastSignatureData().id(), stat.getLastSignatureData().getGroundTruthPose()));
 			}
@@ -2220,6 +2272,7 @@ void MainWindow::updateMapCloud(
 	// Map updated! regenerate the assembled cloud, last pose is the new one
 	UDEBUG("Update map with %d locations", poses.size());
 	QMap<std::string, Transform> viewerClouds = _cloudViewer->getAddedClouds();
+	std::set<std::string> viewerLines = _cloudViewer->getAddedLines();
 	int i=1;
 	for(std::map<int, Transform>::const_iterator iter = poses.begin(); iter!=poses.end(); ++iter)
 	{
@@ -2392,6 +2445,29 @@ void MainWindow::updateMapCloud(
 				_cloudViewer->setCloudVisibility(featuresName.c_str(), false);
 			}
 
+			// Gravity arrows
+			std::string gravityName = uFormat("gravity%d", iter->first);
+			if(iter->first == 0)
+			{
+				viewerLines.erase(gravityName);
+				_cloudViewer->removeLine(gravityName);
+			}
+			if(_cloudViewer->isVisible() && _preferencesDialog->isIMUGravityShown(0))
+			{
+				std::multimap<int, Link>::const_iterator linkIter = graph::findLink(constraints, iter->first, iter->first, false, Link::kGravity);
+				if(linkIter != constraints.end())
+				{
+					Transform gravityT = linkIter->second.transform();
+					Eigen::Vector3f gravity(0,0,-_preferencesDialog->getIMUGravityLength(0));
+					gravity = (gravityT.rotation()*(iter->second).rotation().inverse()).toEigen3f()*gravity;
+					_cloudViewer->addOrUpdateLine(gravityName, iter->second, (iter->second).translation()*Transform(gravity[0], gravity[1], gravity[2], 0, 0, 0)*iter->second.rotation().inverse(), Qt::yellow, false, false);
+				}
+			}
+			else if(viewerLines.find(gravityName)!=viewerLines.end())
+			{
+				_cloudViewer->removeLine(gravityName.c_str());
+			}
+
 			if(verboseProgress)
 			{
 				_progressDialog->appendText(tr("Updated cloud %1 (%2/%3)").arg(iter->first).arg(i).arg(poses.size()));
@@ -2425,6 +2501,21 @@ void MainWindow::updateMapCloud(
 					UDEBUG("Hide %s", iter.key().c_str());
 					_cloudViewer->setCloudVisibility(iter.key(), false);
 				}
+			}
+		}
+	}
+	// remove not used gravity lines
+	for(std::set<std::string>::iterator iter = viewerLines.begin(); iter!=viewerLines.end(); ++iter)
+	{
+		std::list<std::string> splitted = uSplitNumChar(*iter);
+		int id = 0;
+		if(splitted.size() == 2)
+		{
+			id = std::atoi(splitted.back().c_str());
+			if(poses.find(id) == poses.end())
+			{
+				UDEBUG("Remove %s", iter->c_str());
+				_cloudViewer->removeLine(*iter);
 			}
 		}
 	}
@@ -2647,7 +2738,7 @@ void MainWindow::updateMapCloud(
 		for(std::map<int, Transform>::const_iterator iter=posesIn.begin(); iter!=posesIn.end() && iter->first<0; ++iter)
 		{
 #if PCL_VERSION_COMPARE(>=, 1, 7, 2)
-			_cloudViewer->addOrUpdateCoordinate(uFormat("landmark_%d", -iter->first), iter->second, _preferencesDialog->getMarkerLength()<=0?0.1:_preferencesDialog->getMarkerLength()/2.0, false);
+			_cloudViewer->addOrUpdateCoordinate(uFormat("landmark_%d", -iter->first), iter->second, _preferencesDialog->landmarkVisSize()>0.0?_preferencesDialog->landmarkVisSize():_preferencesDialog->getMarkerLength()<=0?0.1:_preferencesDialog->getMarkerLength()/2.0, false);
 #endif
 			if(_preferencesDialog->isLabelsShown())
 			{
@@ -4314,14 +4405,14 @@ void MainWindow::drawKeypoints(const std::multimap<int, cv::KeyPoint> & refWords
 				iter->first.y,
 				(iter->second.x*scaleLoop+loopMarginX+deltaX-sourceMarginX)/scaleSource,
 				(iter->second.y*scaleLoop+loopMarginY+deltaY-sourceMarginY)/scaleSource,
-				Qt::cyan);
+				_ui->imageView_source->getDefaultMatchingLineColor());
 
 		_ui->imageView_loopClosure->addLine(
 				(iter->first.x*scaleSource+sourceMarginX-deltaX-loopMarginX)/scaleLoop,
 				(iter->first.y*scaleSource+sourceMarginY-deltaY-loopMarginY)/scaleLoop,
 				iter->second.x,
 				iter->second.y,
-				Qt::cyan);
+				_ui->imageView_loopClosure->getDefaultMatchingLineColor());
 	}
 	_ui->imageView_source->update();
 	_ui->imageView_loopClosure->update();
@@ -4446,6 +4537,7 @@ void MainWindow::updateSelectSourceMenu()
 	_ui->actionKinect_for_Windows_SDK_v2->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcK4W2);
 	_ui->actionRealSense_R200->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcRealSense);
 	_ui->actionRealSense_ZR300->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcRealSense);
+	_ui->actionRealSense2_SR300->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcRealSense2);
 	_ui->actionRealSense2_D415->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcRealSense2);
 	_ui->actionRealSense2_D435->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcRealSense2);
 	_ui->actionStereoDC1394->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcDC1394);
@@ -4453,6 +4545,7 @@ void MainWindow::updateSelectSourceMenu()
 	_ui->actionStereoZed->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcStereoZed);
     _ui->actionStereoTara->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcStereoTara);
 	_ui->actionStereoUsb->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcStereoUsb);
+	_ui->actionRealSense2_T265->setChecked(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcStereoRealSense2);
 }
 
 void MainWindow::changeImgRateSetting()
@@ -4724,6 +4817,13 @@ void MainWindow::openDatabase(const QString & path, const ParametersMap & overri
 								different = false;
 							}
 						}
+						else if(Parameters::getType(iter->first).compare("bool") == 0)
+						{
+							if(uStr2Bool(iter->second) == uStr2Bool(jter->second))
+							{
+								different = false;
+							}
+						}
 						if(different)
 						{
 							differentParameters.insert(*iter);
@@ -4852,10 +4952,17 @@ void MainWindow::editDatabase()
 	}
 }
 
+Camera * MainWindow::createCamera()
+{
+	return _preferencesDialog->createCamera();
+}
+
 void MainWindow::startDetection()
 {
 	UDEBUG("");
 	ParametersMap parameters = _preferencesDialog->getAllParameters();
+	uInsert(parameters, this->getCustomParameters());
+
 	// verify source with input rates
 	if(_preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcImages ||
 	   _preferencesDialog->getSourceDriver() == PreferencesDialog::kSrcVideo ||
@@ -4949,7 +5056,7 @@ void MainWindow::startDetection()
 	}
 
 
-	Camera * camera = _preferencesDialog->createCamera();
+	Camera * camera = this->createCamera();
 	if(!camera)
 	{
 		Q_EMIT stateChanged(kInitialized);
@@ -4971,6 +5078,10 @@ void MainWindow::startDetection()
 			_preferencesDialog->getSourceScanNormalsK(),
 			_preferencesDialog->getSourceScanNormalsRadius(),
 			_preferencesDialog->isSourceScanForceGroundNormalsUp());
+	if(_preferencesDialog->getIMUFilteringStrategy()>0 && dynamic_cast<DBReader*>(camera) == 0)
+	{
+		_camera->enableIMUFiltering(_preferencesDialog->getIMUFilteringStrategy()-1, parameters);
+	}
 	if(_preferencesDialog->isDepthFilteringAvailable())
 	{
 		if(_preferencesDialog->isBilateralFiltering())
@@ -5743,13 +5854,6 @@ void MainWindow::postProcessing()
 											UASSERT(_currentPosesMap.find(fromId) != _currentPosesMap.end());
 											UASSERT_MSG(_currentPosesMap.find(from) != _currentPosesMap.end(), uFormat("id=%d poses=%d links=%d", from, (int)poses.size(), (int)links.size()).c_str());
 											UASSERT_MSG(_currentPosesMap.find(to) != _currentPosesMap.end(), uFormat("id=%d poses=%d links=%d", to, (int)poses.size(), (int)links.size()).c_str());
-											if(optimizer->gravitySigma() > 0)
-											{
-												for(std::map<int, Transform>::iterator jter=odomPoses.begin(); jter!=odomPoses.end(); ++jter)
-												{
-													linksIn.insert(std::make_pair(jter->first, Link(jter->first, jter->first, Link::kPoseOdom, jter->second)));
-												}
-											}
 											optimizer->getConnectedGraph(fromId, _currentPosesMap, linksIn, poses, links);
 											UASSERT(poses.find(fromId) != poses.end());
 											UASSERT_MSG(poses.find(from) != poses.end(), uFormat("id=%d poses=%d links=%d", from, (int)poses.size(), (int)links.size()).c_str());
@@ -5861,13 +5965,6 @@ void MainWindow::postProcessing()
 				std::multimap<int, rtabmap::Link> linksOut;
 				std::map<int, rtabmap::Transform> optimizedPoses;
 				std::multimap<int, rtabmap::Link> linksIn = _currentLinksMap;
-				if(optimizer->gravitySigma() > 0)
-				{
-					for(std::map<int, Transform>::iterator iter=odomPoses.begin(); iter!=odomPoses.end(); ++iter)
-					{
-						linksIn.insert(std::make_pair(iter->first, Link(iter->first, iter->first, Link::kPoseOdom, iter->second)));
-					}
-				}
 				optimizer->getConnectedGraph(
 						fromId,
 						_currentPosesMap,
@@ -5977,13 +6074,6 @@ void MainWindow::postProcessing()
 	std::multimap<int, rtabmap::Link> linksOut;
 	std::map<int, rtabmap::Transform> optimizedPoses;
 	std::multimap<int, rtabmap::Link> linksIn = _currentLinksMap;
-	if(optimizer->gravitySigma() > 0)
-	{
-		for(std::map<int, Transform>::iterator iter=odomPoses.begin(); iter!=odomPoses.end(); ++iter)
-		{
-			linksIn.insert(std::make_pair(iter->first, Link(iter->first, iter->first, Link::kPoseOdom, iter->second)));
-		}
-	}
 	optimizer->getConnectedGraph(
 			fromId,
 			_currentPosesMap,
@@ -6186,6 +6276,11 @@ void MainWindow::selectRealSense()
 void MainWindow::selectRealSense2()
 {
 	_preferencesDialog->selectSourceDriver(PreferencesDialog::kSrcRealSense2);
+}
+
+void MainWindow::selectRealSense2Stereo()
+{
+	_preferencesDialog->selectSourceDriver(PreferencesDialog::kSrcStereoRealSense2);
 }
 
 void MainWindow::selectStereoDC1394()

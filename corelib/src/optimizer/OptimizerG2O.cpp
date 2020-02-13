@@ -341,28 +341,23 @@ std::map<int, Transform> OptimizerG2O::optimize(
 				{
 					// check if it is SE2 or only PointXY
 					std::multimap<int, Link>::const_iterator jter=edgeConstraints.find(id);
-					if(jter != edgeConstraints.end())
+					UASSERT(jter != edgeConstraints.end());
+
+					if (1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
 					{
-						if (1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
-						{
-							g2o::VertexPointXY * v2 = new g2o::VertexPointXY();
-							v2->setEstimate(Eigen::Vector2d(iter->second.x(), iter->second.y()));
-							vertex = v2;
-							isLandmarkWithRotation.insert(std::make_pair(id, false));
-							id = landmarkVertexOffset - id;
-						}
-						else
-						{
-							g2o::VertexSE2 * v2 = new g2o::VertexSE2();
-							v2->setEstimate(g2o::SE2(iter->second.x(), iter->second.y(), iter->second.theta()));
-							vertex = v2;
-							isLandmarkWithRotation.insert(std::make_pair(id, true));
-							id = landmarkVertexOffset - id;
-						}
+						g2o::VertexPointXY * v2 = new g2o::VertexPointXY();
+						v2->setEstimate(Eigen::Vector2d(iter->second.x(), iter->second.y()));
+						vertex = v2;
+						isLandmarkWithRotation.insert(std::make_pair(id, false));
+						id = landmarkVertexOffset - id;
 					}
 					else
 					{
-						continue;
+						g2o::VertexSE2 * v2 = new g2o::VertexSE2();
+						v2->setEstimate(g2o::SE2(iter->second.x(), iter->second.y(), iter->second.theta()));
+						vertex = v2;
+						isLandmarkWithRotation.insert(std::make_pair(id, true));
+						id = landmarkVertexOffset - id;
 					}
 				}
 				else
@@ -391,34 +386,29 @@ std::map<int, Transform> OptimizerG2O::optimize(
 				{
 					// check if it is SE3 or only PointXYZ
 					std::multimap<int, Link>::const_iterator jter=edgeConstraints.find(id);
-					if(jter != edgeConstraints.end())
+					UASSERT(jter != edgeConstraints.end());
+
+					if (1 / static_cast<double>(jter->second.infMatrix().at<double>(3,3)) >= 9999.0 ||
+						1 / static_cast<double>(jter->second.infMatrix().at<double>(4,4)) >= 9999.0 ||
+						1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
 					{
-						if (1 / static_cast<double>(jter->second.infMatrix().at<double>(3,3)) >= 9999.0 ||
-							1 / static_cast<double>(jter->second.infMatrix().at<double>(4,4)) >= 9999.0 ||
-							1 / static_cast<double>(jter->second.infMatrix().at<double>(5,5)) >= 9999.0)
-						{
-							g2o::VertexPointXYZ * v3 = new g2o::VertexPointXYZ();
-							v3->setEstimate(Eigen::Vector3d(iter->second.x(), iter->second.y(), iter->second.z()));
-							vertex = v3;
-							isLandmarkWithRotation.insert(std::make_pair(id, false));
-							id = landmarkVertexOffset - id;
-						}
-						else
-						{
-							g2o::VertexSE3 * v3 = new g2o::VertexSE3();
-							Eigen::Affine3d a = iter->second.toEigen3d();
-							Eigen::Isometry3d pose;
-							pose = a.linear();
-							pose.translation() = a.translation();
-							v3->setEstimate(pose);
-							vertex = v3;
-							isLandmarkWithRotation.insert(std::make_pair(id, true));
-							id = landmarkVertexOffset - id;
-						}
+						g2o::VertexPointXYZ * v3 = new g2o::VertexPointXYZ();
+						v3->setEstimate(Eigen::Vector3d(iter->second.x(), iter->second.y(), iter->second.z()));
+						vertex = v3;
+						isLandmarkWithRotation.insert(std::make_pair(id, false));
+						id = landmarkVertexOffset - id;
 					}
 					else
 					{
-						continue;
+						g2o::VertexSE3 * v3 = new g2o::VertexSE3();
+						Eigen::Affine3d a = iter->second.toEigen3d();
+						Eigen::Isometry3d pose;
+						pose = a.linear();
+						pose.translation() = a.translation();
+						v3->setEstimate(pose);
+						vertex = v3;
+						isLandmarkWithRotation.insert(std::make_pair(id, true));
+						id = landmarkVertexOffset - id;
 					}
 				}
 				else
@@ -432,7 +422,7 @@ std::map<int, Transform> OptimizerG2O::optimize(
 
 		UDEBUG("fill edges to g2o...");
 #if defined(RTABMAP_VERTIGO)
-		int vertigoVertexId = landmarkVertexOffset - (poses.begin()->first<0?poses.begin()->first:0);
+		int vertigoVertexId = landmarkVertexOffset - (poses.begin()->first<0?poses.begin()->first-1:0);
 #endif
 		for(std::multimap<int, Link>::const_iterator iter=edgeConstraints.begin(); iter!=edgeConstraints.end(); ++iter)
 		{
@@ -540,7 +530,7 @@ std::map<int, Transform> OptimizerG2O::optimize(
 						}
 					}
 				}
-				else if(!isSlam2d() && gravitySigma() > 0 && iter->second.type() == Link::kPoseOdom && poses.find(iter->first) != poses.end())
+				else if(!isSlam2d() && gravitySigma() > 0 && iter->second.type() == Link::kGravity && poses.find(iter->first) != poses.end())
 				{
 					Eigen::Matrix<double, 6, 1> m;
 					// Up vector in robot frame
@@ -1382,7 +1372,7 @@ std::map<int, Transform> OptimizerG2O::optimizeBA(
 				// negative root means that all other poses should be fixed instead of the root
 				vCam->setFixed((rootId >= 0 && iter->first == rootId) || (rootId < 0 && iter->first != -rootId));
 
-				UDEBUG("cam %d (fixed=%d) fx=%f fy=%f cx=%f cy=%f Tx=%f baseline=%f t=%s",
+				/*UDEBUG("cam %d (fixed=%d) fx=%f fy=%f cx=%f cy=%f Tx=%f baseline=%f t=%s",
 						iter->first,
 						vCam->fixed()?1:0,
 						iterModel->second.fx(),
@@ -1391,7 +1381,7 @@ std::map<int, Transform> OptimizerG2O::optimizeBA(
 						iterModel->second.cy(),
 						iterModel->second.Tx(),
 						iterModel->second.Tx()<0.0?-iterModel->second.Tx()/iterModel->second.fx():baseline_,
-						camPose.prettyPrint().c_str());
+						camPose.prettyPrint().c_str());*/
 
 				UASSERT_MSG(optimizer.addVertex(vCam), uFormat("cannot insert vertex %d!?", iter->first).c_str());
 			}
@@ -1413,7 +1403,7 @@ std::map<int, Transform> OptimizerG2O::optimizeBA(
 				{
 #ifndef RTABMAP_ORB_SLAM2
 					g2o::HyperGraph::Edge * edge = 0;
-					if(gravitySigma() > 0 && iter->second.type() == Link::kPoseOdom && poses.find(iter->first) != poses.end())
+					if(gravitySigma() > 0 && iter->second.type() == Link::kGravity && poses.find(iter->first) != poses.end())
 					{
 						Eigen::Matrix<double, 6, 1> m;
 						// Up vector in robot frame
@@ -1427,6 +1417,9 @@ std::map<int, Transform> OptimizerG2O::optimizeBA(
 
 						g2o::VertexCam* v1 = (g2o::VertexCam*)optimizer.vertex(id1);
 						EdgeSBACamGravity* priorEdge(new EdgeSBACamGravity());
+						std::map<int, CameraModel>::const_iterator iterModel = models.find(iter->first);
+						UASSERT(iterModel != models.end() && !iterModel->second.localTransform().isNull());
+						priorEdge->setCameraInvLocalTransform(iterModel->second.localTransform().inverse().toEigen3d().linear());
 						priorEdge->setMeasurement(m);
 						priorEdge->setInformation(information);
 						priorEdge->vertices()[0] = v1;
@@ -1728,7 +1721,7 @@ std::map<int, Transform> OptimizerG2O::optimizeBA(
 					// remove model local transform
 					t *= models.at(iter->first).localTransform().inverse();
 
-					UDEBUG("%d from=%s to=%s", iter->first, iter->second.prettyPrint().c_str(), t.prettyPrint().c_str());
+					//UDEBUG("%d from=%s to=%s", iter->first, iter->second.prettyPrint().c_str(), t.prettyPrint().c_str());
 					if(t.isNull())
 					{
 						UERROR("Optimized pose %d is null!?!?", iter->first);
@@ -1939,7 +1932,11 @@ bool OptimizerG2O::saveGraph(
 			bool isSE2 = true;
 			bool isSE3 = true;
 
-			if (iter->second.type() == Link::kPosePrior)
+			if (iter->second.type() == Link::kGravity)
+			{
+				continue;
+			}
+			else if (iter->second.type() == Link::kPosePrior)
 			{
 				if (this->priorsIgnored())
 				{
