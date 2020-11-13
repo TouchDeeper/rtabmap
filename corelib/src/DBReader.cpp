@@ -47,14 +47,16 @@ DBReader::DBReader(const std::string & databasePath,
 				   bool odometryIgnored,
 				   bool ignoreGoalDelay,
 				   bool goalsIgnored,
-				   int startIndex,
-				   int cameraIndex) :
+				   int stopId,
+				   int cameraIndex,
+				   int endId) :
 	Camera(frameRate),
 	_paths(uSplit(databasePath, ';')),
 	_odometryIgnored(odometryIgnored),
 	_ignoreGoalDelay(ignoreGoalDelay),
 	_goalsIgnored(goalsIgnored),
-	_startIndex(startIndex),
+	_startId(stopId),
+	_stopId(endId),
 	_cameraIndex(cameraIndex),
 	_dbDriver(0),
 	_currentId(_ids.end()),
@@ -63,6 +65,10 @@ DBReader::DBReader(const std::string & databasePath,
 	_previousMapID(0),
 	_calibrated(false)
 {
+	if(_stopId>0 && _stopId<_startId)
+	{
+		_stopId = _startId;
+	}
 }
 
 DBReader::DBReader(const std::list<std::string> & databasePaths,
@@ -70,14 +76,16 @@ DBReader::DBReader(const std::list<std::string> & databasePaths,
 				   bool odometryIgnored,
 				   bool ignoreGoalDelay,
 				   bool goalsIgnored,
-				   int startIndex,
-				   int cameraIndex) :
+				   int stopId,
+				   int cameraIndex,
+				   int endId) :
 	Camera(frameRate),
    _paths(databasePaths),
 	_odometryIgnored(odometryIgnored),
 	_ignoreGoalDelay(ignoreGoalDelay),
 	_goalsIgnored(goalsIgnored),
-	_startIndex(startIndex),
+	_startId(stopId),
+	_stopId(endId),
 	_cameraIndex(cameraIndex),
 	_dbDriver(0),
 	_currentId(_ids.end()),
@@ -86,6 +94,10 @@ DBReader::DBReader(const std::list<std::string> & databasePaths,
 	_previousMapID(0),
 	_calibrated(false)
 {
+	if(_stopId>0 && _stopId<_startId)
+	{
+		_stopId = _startId;
+	}
 }
 
 DBReader::~DBReader()
@@ -146,12 +158,12 @@ bool DBReader::init(
 
 	_dbDriver->getAllNodeIds(_ids);
 	_currentId = _ids.begin();
-	if(_startIndex>0 && _ids.size())
+	if(_startId>0 && _ids.size())
 	{
-		std::set<int>::iterator iter = uIteratorAt(_ids, _startIndex);
+		std::set<int>::iterator iter = _ids.find(_startId);
 		if(iter == _ids.end())
 		{
-			UWARN("Start index is too high (%d), the last in database is %d. Starting from beginning...", _startIndex, _ids.size()-1);
+			UWARN("Start index is too high (%d), the last ID in database is %d. Starting from beginning...", _startId, *_ids.rbegin());
 		}
 		else
 		{
@@ -213,6 +225,11 @@ std::string DBReader::getSerial() const
 SensorData DBReader::captureImage(CameraInfo * info)
 {
 	SensorData data = this->getNextData(info);
+	if(data.id()>0 && _stopId>0 && data.id() > _stopId)
+	{
+		UINFO("Last ID %d has been reached! Ignoring", _stopId);
+		return SensorData();
+	}
 	if(data.id() == 0)
 	{
 		UINFO("no more images...");
@@ -231,6 +248,7 @@ SensorData DBReader::captureImage(CameraInfo * info)
 			}
 		}
 	}
+
 	if(data.id())
 	{
 		std::string goalId;
@@ -268,7 +286,8 @@ SensorData DBReader::captureImage(CameraInfo * info)
 						Transform localTransform, pose, groundTruth;
 						std::vector<float> velocity;
 						GPS gps;
-						_dbDriver->getNodeInfo(*_currentId, pose, mapId, weight, label, stamp, groundTruth, velocity, gps);
+						EnvSensors sensors;
+						_dbDriver->getNodeInfo(*_currentId, pose, mapId, weight, label, stamp, groundTruth, velocity, gps, sensors);
 						if(previousStamp && stamp && stamp > previousStamp)
 						{
 							delay = stamp - previousStamp;
@@ -312,23 +331,57 @@ SensorData DBReader::getNextData(CameraInfo * info)
 	{
 		if(_currentId != _ids.end())
 		{
-			int mapId;
-			_dbDriver->getNodeData(*_currentId, data);
+			std::list<int> signIds;
+			signIds.push_back(*_currentId);
+			std::list<Signature *> signatures;
+			_dbDriver->loadSignatures(signIds, signatures);
+			if(signatures.empty())
+			{
+				return data;
+			}
+			_dbDriver->loadNodeData(signatures);
+			Signature * s  = signatures.front();
+			data = s->sensorData();
 
 			// info
-			Transform pose;
-			int weight;
-			std::string label;
-			double stamp;
-			Transform groundTruth;
-			std::vector<float> velocity;
-			GPS gps;
-			_dbDriver->getNodeInfo(*_currentId, pose, mapId, weight, label, stamp, groundTruth, velocity, gps);
+			Transform pose = s->getPose();
+			Transform globalPose;
+			cv::Mat globalPoseCov;
+
+			std::multimap<int, Link> priorLinks;
+			_dbDriver->loadLinks(*_currentId, priorLinks, Link::kPosePrior);
+			if( priorLinks.size() &&
+				!priorLinks.begin()->second.transform().isNull() &&
+				priorLinks.begin()->second.infMatrix().cols == 6 &&
+				priorLinks.begin()->second.infMatrix().rows == 6)
+			{
+				globalPose = priorLinks.begin()->second.transform();
+				globalPoseCov = priorLinks.begin()->second.infMatrix().inv();
+				if(data.gps().stamp() != 0.0 &&
+						globalPoseCov.at<double>(3,3)>=9999 &&
+						globalPoseCov.at<double>(4,4)>=9999 &&
+						globalPoseCov.at<double>(5,5)>=9999)
+				{
+					// clear global pose as GPS was used for prior
+					globalPose.setNull();
+				}
+			}
+
+			Transform gravityTransform;
+			std::multimap<int, Link> gravityLinks;
+			_dbDriver->loadLinks(*_currentId, gravityLinks, Link::kGravity);
+			if( gravityLinks.size() &&
+				!gravityLinks.begin()->second.transform().isNull() &&
+				gravityLinks.begin()->second.infMatrix().cols == 6 &&
+				gravityLinks.begin()->second.infMatrix().rows == 6)
+			{
+				gravityTransform = gravityLinks.begin()->second.transform();
+			}
 
 			cv::Mat infMatrix = cv::Mat::eye(6,6,CV_64FC1);
 			if(!_odometryIgnored)
 			{
-				std::map<int, Link> links;
+				std::multimap<int, Link> links;
 				_dbDriver->loadLinks(*_currentId, links, Link::kNeighbor);
 				if(links.size() && links.begin()->first < *_currentId)
 				{
@@ -336,11 +389,11 @@ SensorData DBReader::getNextData(CameraInfo * info)
 					infMatrix = links.begin()->second.infMatrix();
 					_previousInfMatrix = infMatrix;
 				}
-				else if(_previousMapId != mapId)
+				else if(_previousMapId != s->mapId())
 				{
 					// first node, set high variance to make rtabmap trigger a new map
 					infMatrix /= 9999.0;
-					UDEBUG("First node of map %d, variance set to 9999", mapId);
+					UDEBUG("First node of map %d, variance set to 9999", s->mapId());
 				}
 				else
 				{
@@ -351,7 +404,7 @@ SensorData DBReader::getNextData(CameraInfo * info)
 					// we have a node not linked to map, use last variance
 					infMatrix = _previousInfMatrix;
 				}
-				_previousMapId = mapId;
+				_previousMapId = s->mapId();
 			}
 			else
 			{
@@ -360,26 +413,24 @@ SensorData DBReader::getNextData(CameraInfo * info)
 
 			int seq = *_currentId;
 			++_currentId;
-			if(data.imageCompressed().empty() && weight>=0)
-			{
-				UWARN("No image loaded from the database for id=%d!", *_currentId);
-			}
 
 			// Frame rate
 			if(this->getImageRate() < 0.0f)
 			{
-				if(stamp == 0)
+				if(s->getStamp() == 0)
 				{
 					UERROR("The option to use database stamps is set (framerate<0), but there are no stamps saved in the database! Aborting...");
+					delete s;
 					return data;
 				}
-				else if(_previousMapID == mapId && _previousStamp > 0)
+				else if(_previousMapID == s->mapId() && _previousStamp > 0)
 				{
-					int sleepTime = 1000.0*(stamp-_previousStamp) - 1000.0*_timer.getElapsedTime();
+					float ratio = -this->getImageRate();
+					int sleepTime = 1000.0*(s->getStamp()-_previousStamp)/ratio - 1000.0*_timer.getElapsedTime();
 					if(sleepTime > 10000)
 					{
 						UWARN("Detected long delay (%d sec, stamps = %f vs %f). Waiting a maximum of 10 seconds.",
-								sleepTime/1000, _previousStamp, stamp);
+								sleepTime/1000, _previousStamp, s->getStamp());
 						sleepTime = 10000;
 					}
 					if(sleepTime > 2)
@@ -388,21 +439,17 @@ SensorData DBReader::getNextData(CameraInfo * info)
 					}
 
 					// Add precision at the cost of a small overhead
-					while(_timer.getElapsedTime() < (stamp-_previousStamp)-0.000001)
+					while(_timer.getElapsedTime() < (s->getStamp()-_previousStamp)/ratio-0.000001)
 					{
 						//
 					}
 
 					double slept = _timer.getElapsedTime();
 					_timer.start();
-					UDEBUG("slept=%fs vs target=%fs", slept, stamp-_previousStamp);
+					UDEBUG("slept=%fs vs target=%fs (ratio=%f)", slept, (s->getStamp()-_previousStamp)/ratio, ratio);
 				}
-				_previousStamp = stamp;
-				_previousMapID = mapId;
-			}
-			else
-			{
-				stamp = 0;
+				_previousStamp = s->getStamp();
+				_previousMapID = s->mapId();
 			}
 
 			data.uncompressData();
@@ -413,24 +460,23 @@ SensorData DBReader::getNextData(CameraInfo * info)
 				{
 					// select one camera
 					int subImageWidth = data.imageRaw().cols/data.cameraModels().size();
+					cv::Mat image;
 					UASSERT(!data.imageRaw().empty() &&
 							data.imageRaw().cols % data.cameraModels().size() == 0 &&
 							_cameraIndex*subImageWidth < data.imageRaw().cols);
-					data.setImageRaw(
-							cv::Mat(data.imageRaw(),
-							cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.imageRaw().rows)).clone());
+					image= cv::Mat(data.imageRaw(),
+						   cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.imageRaw().rows)).clone();
 
+					cv::Mat depth;
 					if(!data.depthOrRightRaw().empty())
 					{
 						UASSERT(data.depthOrRightRaw().cols % data.cameraModels().size() == 0 &&
 								subImageWidth == data.depthOrRightRaw().cols/(int)data.cameraModels().size() &&
 								_cameraIndex*subImageWidth < data.depthOrRightRaw().cols);
-						data.setDepthOrRightRaw(
-								cv::Mat(data.depthOrRightRaw(),
-								cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.depthOrRightRaw().rows)).clone());
+						depth = cv::Mat(data.depthOrRightRaw(),
+							    cv::Rect(_cameraIndex*subImageWidth, 0, subImageWidth, data.depthOrRightRaw().rows)).clone();
 					}
-					CameraModel model = data.cameraModels().at(_cameraIndex);
-					data.setCameraModel(model);
+					data.setRGBDImage(image, depth, data.cameraModels().at(_cameraIndex));
 				}
 				else
 				{
@@ -438,14 +484,64 @@ SensorData DBReader::getNextData(CameraInfo * info)
 				}
 			}
 			data.setId(seq);
-			data.setStamp(stamp);
-			data.setGroundTruth(groundTruth);
-			data.setGPS(gps);
-			UDEBUG("Laser=%d RGB/Left=%d Depth/Right=%d, UserData=%d",
+			data.setStamp(s->getStamp());
+			data.setGroundTruth(s->getGroundTruthPose());
+			if(globalPose.isNull())
+			{
+				data.setGlobalPose(globalPose, globalPoseCov);
+			}
+			if(!gravityTransform.isNull())
+			{
+				Eigen::Quaterniond q = gravityTransform.getQuaterniond();
+				data.setIMU(IMU(
+						cv::Vec4d(q.x(), q.y(), q.z(), q.w()), cv::Mat::eye(3,3,CV_64FC1),
+						cv::Vec3d(), cv::Mat(),
+						cv::Vec3d(), cv::Mat(),
+						Transform::getIdentity())); // we assume that gravity links are already transformed in base_link
+			}
+
+			UDEBUG("Laser=%d RGB/Left=%d Depth/Right=%d, Grid=%d, UserData=%d, GlobalPose=%d, GPS=%d, IMU=%d",
 					data.laserScanRaw().isEmpty()?0:1,
 					data.imageRaw().empty()?0:1,
 					data.depthOrRightRaw().empty()?0:1,
-					data.userDataRaw().empty()?0:1);
+					data.gridCellSize()==0.0f?0:1,
+					data.userDataRaw().empty()?0:1,
+					globalPose.isNull()?0:1,
+					data.gps().stamp()!=0.0?1:0,
+					gravityTransform.isNull()?0:1);
+
+			cv::Mat descriptors;
+			if(!s->getWordsDescriptors().empty())
+			{
+				descriptors = cv::Mat(
+					s->getWordsDescriptors().size(),
+					s->getWordsDescriptors().begin()->second.cols,
+					s->getWordsDescriptors().begin()->second.type());
+				int i=0;
+				for(std::multimap<int, cv::Mat>::const_iterator iter=s->getWordsDescriptors().begin();
+					iter!=s->getWordsDescriptors().end();
+					++iter, ++i)
+				{
+					iter->second.copyTo(descriptors.row(i));
+				}
+			}
+			std::vector<cv::KeyPoint> keypoints = uValues(s->getWords());
+			std::vector<cv::Point3f> keypoints3D = uValues(s->getWords3());
+			if(!keypoints.empty() &&
+			   (keypoints3D.empty() || keypoints.size() == keypoints3D.size()) &&
+			   (descriptors.empty() || (int)keypoints.size() == descriptors.rows))
+			{
+				data.setFeatures(keypoints, keypoints3D, descriptors);
+			}
+			else if(!keypoints.empty() && (!keypoints3D.empty() || !descriptors.empty()))
+			{
+				UERROR("Missing feature data, features won't be published.");
+			}
+
+			if(data.imageCompressed().empty() && s->getWeight()>=0 && keypoints.empty())
+			{
+				UWARN("No image loaded from the database for id=%d!", seq);
+			}
 
 			if(!_odometryIgnored)
 			{
@@ -459,10 +555,11 @@ SensorData DBReader::getNextData(CameraInfo * info)
 				{
 					info->odomPose = pose;
 					info->odomCovariance = infMatrix.inv();
-					info->odomVelocity = velocity;
+					info->odomVelocity = s->getVelocity();
 					UDEBUG("odom variance = %f/%f", info->odomCovariance.at<double>(0,0), info->odomCovariance.at<double>(5,5));
 				}
 			}
+			delete s;
 		}
 	}
 	else

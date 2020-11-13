@@ -50,15 +50,17 @@ public:
 			 bool odometryIgnored = false,
 			 bool ignoreGoalDelay = false,
 			 bool goalsIgnored = false,
-			 int startIndex = 0,
-			 int cameraIndex = -1);
+			 int startId = 0,
+			 int cameraIndex = -1,
+			 int stopId = 0);
 	DBReader(const std::list<std::string> & databasePaths,
 			 float frameRate = 0.0f, // -1 = use Database stamps, 0 = inf
 			 bool odometryIgnored = false,
 			 bool ignoreGoalDelay = false,
 			 bool goalsIgnored = false,
-			 int startIndex = 0,
-			 int cameraIndex = -1);
+			 int startId = 0,
+			 int cameraIndex = -1,
+			 int stopId = 0);
 	virtual ~DBReader();
 
 	virtual bool init(
@@ -80,7 +82,8 @@ private:
 	bool _odometryIgnored;
 	bool _ignoreGoalDelay;
 	bool _goalsIgnored;
-	int _startIndex;
+	int _startId;
+	int _stopId;
 	int _cameraIndex;
 
 	DBDriver * _dbDriver;

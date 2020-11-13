@@ -33,6 +33,31 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace rtabmap {
 
+std::string Link::typeName(Type type)
+{
+	if(type == Link::kNeighbor)
+		return "Neighbor";
+	if(type == Link::kGlobalClosure)
+		return "GlobalClosure";
+	if(type == Link::kLocalSpaceClosure)
+		return "LocalSpaceClosure";
+	if(type == Link::kLocalTimeClosure)
+		return "LocalTimeClosure";
+	if(type == Link::kUserClosure)
+		return "UserClosure";
+	if(type == Link::kVirtualClosure)
+		return "VirtualClosure";
+	if(type == Link::kNeighborMerged)
+		return "NeighborMerged";
+	if(type == Link::kPosePrior)
+		return "PosePrior";
+	if(type == Link::kLandmark)
+		return "Landmark";
+	if(type == Link::kGravity)
+		return "Gravity";
+	return "Undefined";
+}
+
 Link::Link() :
 	from_(0),
 	to_(0),
@@ -63,27 +88,57 @@ Link::Link(int from,
 	}
 }
 
-double Link::rotVariance() const
+double Link::rotVariance(bool minimum) const
 {
-	double min = uMax3(infMatrix_.at<double>(3,3), infMatrix_.at<double>(4,4), infMatrix_.at<double>(5,5));
-	UASSERT(min > 0.0);
-	return 1.0/min;
+	double value;
+	if(minimum)
+	{
+		value = uMax3(infMatrix_.at<double>(3,3), infMatrix_.at<double>(4,4), infMatrix_.at<double>(5,5));
+	}
+	else
+	{
+		value = uMin3(
+				infMatrix_.at<double>(3,3) <= 0.0001?9999999.0:infMatrix_.at<double>(3,3),
+				infMatrix_.at<double>(4,4) <= 0.0001?9999999.0:infMatrix_.at<double>(4,4),
+				infMatrix_.at<double>(5,5) <= 0.0001?9999999.0:infMatrix_.at<double>(5,5));
+		if(value == 9999999.0)
+		{
+			value = 0.0001;
+		}
+	}
+	UASSERT(value > 0.0);
+	return 1.0/value;
 }
-double Link::transVariance() const
+double Link::transVariance(bool minimum) const
 {
-	double min = uMax3(infMatrix_.at<double>(0,0), infMatrix_.at<double>(1,1), infMatrix_.at<double>(2,2));
-	UASSERT(min > 0.0);
-	return 1.0/min;
+	double value;
+	if(minimum)
+	{
+		value = uMax3(infMatrix_.at<double>(0,0), infMatrix_.at<double>(1,1), infMatrix_.at<double>(2,2));
+	}
+	else
+	{
+		value = uMin3(
+				infMatrix_.at<double>(0,0) <= 0.0001?9999999.0:infMatrix_.at<double>(0,0),
+				infMatrix_.at<double>(1,1) <= 0.0001?9999999.0:infMatrix_.at<double>(1,1),
+				infMatrix_.at<double>(2,2) <= 0.0001?9999999.0:infMatrix_.at<double>(2,2));
+		if(value == 9999999.0)
+		{
+			value = 0.0001;
+		}
+	}
+	UASSERT(value > 0.0);
+	return 1.0/value;
 }
 
 void Link::setInfMatrix(const cv::Mat & infMatrix) {
 	UASSERT(infMatrix.cols == 6 && infMatrix.rows == 6 && infMatrix.type() == CV_64FC1);
-	UASSERT_MSG(uIsFinite(infMatrix.at<double>(0,0)) && infMatrix.at<double>(0,0)>0, uFormat("Linear information should not be null! Value=%f (set to 1 if unknown).", infMatrix.at<double>(0,0)).c_str());
-	UASSERT_MSG(uIsFinite(infMatrix.at<double>(1,1)) && infMatrix.at<double>(1,1)>0, uFormat("Linear information should not be null! Value=%f (set to 1 if unknown).", infMatrix.at<double>(1,1)).c_str());
-	UASSERT_MSG(uIsFinite(infMatrix.at<double>(2,2)) && infMatrix.at<double>(2,2)>0, uFormat("Linear information should not be null! Value=%f (set to 1 if unknown).", infMatrix.at<double>(2,2)).c_str());
-	UASSERT_MSG(uIsFinite(infMatrix.at<double>(3,3)) && infMatrix.at<double>(3,3)>0, uFormat("Angular information should not be null! Value=%f (set to 1 if unknown).", infMatrix.at<double>(3,3)).c_str());
-	UASSERT_MSG(uIsFinite(infMatrix.at<double>(4,4)) && infMatrix.at<double>(4,4)>0, uFormat("Angular information should not be null! Value=%f (set to 1 if unknown).", infMatrix.at<double>(4,4)).c_str());
-	UASSERT_MSG(uIsFinite(infMatrix.at<double>(5,5)) && infMatrix.at<double>(5,5)>0, uFormat("Angular information should not be null! Value=%f (set to 1 if unknown).", infMatrix.at<double>(5,5)).c_str());
+	UASSERT_MSG(uIsFinite(infMatrix.at<double>(0,0)) && infMatrix.at<double>(0,0)>0, uFormat("Linear information X should not be null! Value=%f (set to 1 if unknown or <=1/9999 to be ignored in some computations).", infMatrix.at<double>(0,0)).c_str());
+	UASSERT_MSG(uIsFinite(infMatrix.at<double>(1,1)) && infMatrix.at<double>(1,1)>0, uFormat("Linear information Y should not be null! Value=%f (set to 1 if unknown or <=1/9999 to be ignored in some computations).", infMatrix.at<double>(1,1)).c_str());
+	UASSERT_MSG(uIsFinite(infMatrix.at<double>(2,2)) && infMatrix.at<double>(2,2)>0, uFormat("Linear information Z should not be null! Value=%f (set to 1 if unknown or <=1/9999 to be ignored in some computations).", infMatrix.at<double>(2,2)).c_str());
+	UASSERT_MSG(uIsFinite(infMatrix.at<double>(3,3)) && infMatrix.at<double>(3,3)>0, uFormat("Angular information roll should not be null! Value=%f (set to 1 if unknown or <=1/9999 to be ignored in some computations).", infMatrix.at<double>(3,3)).c_str());
+	UASSERT_MSG(uIsFinite(infMatrix.at<double>(4,4)) && infMatrix.at<double>(4,4)>0, uFormat("Angular information pitch should not be null! Value=%f (set to 1 if unknown or <=1/9999 to be ignored in some computations).", infMatrix.at<double>(4,4)).c_str());
+	UASSERT_MSG(uIsFinite(infMatrix.at<double>(5,5)) && infMatrix.at<double>(5,5)>0, uFormat("Angular information yaw should not be null! Value=%f (set to 1 if unknown or <=1/9999 to be ignored in some computations).", infMatrix.at<double>(5,5)).c_str());
 	infMatrix_ = infMatrix;
 }
 
@@ -112,6 +167,15 @@ Link Link::merge(const Link & link, Type outputType) const
 	UASSERT((link.transform().isNull() && transform_.isNull()) || (!link.transform().isNull() && !transform_.isNull()));
 	UASSERT(infMatrix_.cols == 6 && infMatrix_.rows == 6 && infMatrix_.type() == CV_64FC1);
 	UASSERT(link.infMatrix().cols == 6 && link.infMatrix().rows == 6 && link.infMatrix().type() == CV_64FC1);
+	if(outputType == kNeighborMerged)
+	{
+		return Link(
+			from_,
+			link.to(),
+			outputType,
+			transform_.isNull()?Transform():transform_ * link.transform(),
+			transform_.isNull()?cv::Mat::eye(6,6,CV_64FC1):(infMatrix_.inv() + link.infMatrix().inv()).inv());
+	}
 	return Link(
 			from_,
 			link.to(),

@@ -17,6 +17,7 @@ import android.graphics.Typeface;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.text.TextPaint;
+import android.util.Log;
 
 public class TextManager {
 	
@@ -50,7 +51,7 @@ public class TextManager {
 	public static final int RI_TEXT_TEXTURE_SIZE = 512; // 512
 	public static final float RI_TEXT_HEIGHT_BASE = 32.0f;
 	public static final char RI_TEXT_START = ' ';
-	public static final char RI_TEXT_STOP = '~'+1;
+	public static final char RI_TEXT_STOP = '\u00B0'+1;
 	
 	public float getMaxTextHeight() {return mTextHeight;}
 	
@@ -335,6 +336,8 @@ public class TextManager {
 		float x = val.x;
 		float y = val.y;
 		String text = val.text;
+		
+		Log.i("RTABMapActivity", String.format("convertTextToTriangleInfo() set status=%s", text));
 		
 		// Create 
 		for(int j=0; j<text.length(); j++)

@@ -26,16 +26,24 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "rtabmap/core/Parameters.h"
+#include "rtabmap/core/DBDriver.h"
 #include <rtabmap/utilite/UDirectory.h>
 #include <rtabmap/utilite/ULogger.h>
 #include <rtabmap/utilite/UConversion.h>
 #include <rtabmap/utilite/UStl.h>
+#include <rtabmap/utilite/UFile.h>
 #include <cmath>
 #include <stdlib.h>
 #include <sstream>
 #include <iostream>
 #include <iomanip>
 #include "SimpleIni.h"
+#include <opencv2/core/version.hpp>
+#include <pcl/pcl_config.h>
+#include <opencv2/opencv_modules.hpp>
+#ifndef DISABLE_VTK
+#include <vtkVersion.h>
+#endif
 
 namespace rtabmap
 {
@@ -158,7 +166,8 @@ bool Parameters::isFeatureParameter(const std::string & parameter)
 			group.compare("BRIEF") == 0 ||
 			group.compare("GFTT") == 0 ||
 			group.compare("BRISK") == 0 ||
-			group.compare("KAZE") == 0;
+			group.compare("KAZE") == 0 ||
+			group.compare("SuperPoint") == 0;
 }
 
 rtabmap::ParametersMap Parameters::getDefaultOdometryParameters(bool stereo, bool vis, bool icp)
@@ -173,16 +182,12 @@ rtabmap::ParametersMap Parameters::getDefaultOdometryParameters(bool stereo, boo
 			(icp && group.compare("Icp") == 0) ||
 			(vis && Parameters::isFeatureParameter(iter->first)) ||
 			group.compare("Reg") == 0 ||
-			(vis && group.compare("Vis") == 0) ||
+			group.compare("Optimizer") == 0 ||
+			group.compare("g2o") == 0 ||
+			group.compare("GTSAM") == 0 ||
+			(vis && (group.compare("Vis") == 0 || group.compare("PyMatcher") == 0 || group.compare("GMS") == 0)) ||
 			iter->first.compare(kRtabmapPublishRAMUsage())==0)
 		{
-			if(stereo)
-			{
-				if(iter->first.compare(Parameters::kVisEstimationType()) == 0)
-				{
-					iter->second = "1"; // 3D->2D (PNP)
-				}
-			}
 			odomParameters.insert(*iter);
 		}
 	}
@@ -226,6 +231,31 @@ const std::map<std::string, std::pair<bool, std::string> > & Parameters::getRemo
 	if(removedParameters_.empty())
 	{
 		// removed parameters
+
+		// 0.20.
+		removedParameters_.insert(std::make_pair("SuperGlue/Path",           std::make_pair(true, Parameters::kPyMatcherPath())));
+		removedParameters_.insert(std::make_pair("SuperGlue/Iterations",     std::make_pair(true, Parameters::kPyMatcherIterations())));
+		removedParameters_.insert(std::make_pair("SuperGlue/MatchThreshold", std::make_pair(true, Parameters::kPyMatcherThreshold())));
+		removedParameters_.insert(std::make_pair("SuperGlue/Cuda",           std::make_pair(true, Parameters::kPyMatcherCuda())));
+		removedParameters_.insert(std::make_pair("SuperGlue/Indoor",         std::make_pair(false, Parameters::kPyMatcherModel())));
+
+		removedParameters_.insert(std::make_pair("Vis/CorCrossCheck",   std::make_pair(false, Parameters::kVisCorNNType())));
+		removedParameters_.insert(std::make_pair("SPTorch/ModelPath",   std::make_pair(true,  Parameters::kSuperPointModelPath())));
+		removedParameters_.insert(std::make_pair("SPTorch/Threshold",   std::make_pair(true,  Parameters::kSuperPointThreshold())));
+		removedParameters_.insert(std::make_pair("SPTorch/NMS",         std::make_pair(true,  Parameters::kSuperPointNMS())));
+		removedParameters_.insert(std::make_pair("SPTorch/MinDistance", std::make_pair(true,  Parameters::kSuperPointNMSRadius())));
+		removedParameters_.insert(std::make_pair("SPTorch/Cuda",        std::make_pair(true,  Parameters::kSuperPointCuda())));
+
+		// 0.19.4
+		removedParameters_.insert(std::make_pair("RGBD/MaxLocalizationDistance", std::make_pair(true,  Parameters::kRGBDMaxLoopClosureDistance())));
+
+		// 0.19.3
+		removedParameters_.insert(std::make_pair("Aruco/Dictionary",             std::make_pair(true,  Parameters::kMarkerDictionary())));
+		removedParameters_.insert(std::make_pair("Aruco/MarkerLength",           std::make_pair(true,  Parameters::kMarkerLength())));
+		removedParameters_.insert(std::make_pair("Aruco/MaxDepthError",          std::make_pair(true,  Parameters::kMarkerMaxDepthError())));
+		removedParameters_.insert(std::make_pair("Aruco/VarianceLinear",         std::make_pair(true,  Parameters::kMarkerVarianceLinear())));
+		removedParameters_.insert(std::make_pair("Aruco/VarianceAngular",        std::make_pair(true,  Parameters::kMarkerVarianceAngular())));
+		removedParameters_.insert(std::make_pair("Aruco/CornerRefinementMethod", std::make_pair(true,  Parameters::kMarkerCornerRefinementMethod())));
 
 		// 0.17.5
 		removedParameters_.insert(std::make_pair("Grid/OctoMapOccupancyThr",     std::make_pair(true,  Parameters::kGridGlobalOccupancyThr())));
@@ -520,7 +550,9 @@ const char * Parameters::showUsage()
 	return  "RTAB-Map options:\n"
 			"   --help                         Show usage.\n"
 			"   --version                      Show version of rtabmap and its dependencies.\n"
-			"   --params                       Show all parameters with their default value and description\n"
+			"   --params                       Show all parameters with their default value and description. \n"
+			"                                  If a database path is set as last argument, the parameters in the \n"
+			"                                  database will be shown in INI format.\n"
 			"   --\"parameter name\" \"value\"     Overwrite a specific RTAB-Map's parameter :\n"
 			"                                    --SURF/HessianThreshold 150\n"
 			"                                   For parameters in table format, add ',' between values :\n"
@@ -561,14 +593,56 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 
 				int spacing = 30;
 				std::cout << str << std::setw(spacing - str.size()) << RTABMAP_VERSION << std::endl;
-				str = "OpenCV:";
-#ifdef RTABMAP_OPENCV3
-				std::cout << str << std::setw(spacing - str.size()) << "3" << std::endl;
+				str = "PCL:";
+				std::cout << str << std::setw(spacing - str.size()) << PCL_VERSION_PRETTY << std::endl;
+				str = "With VTK:";
+#ifndef DISABLE_VTK
+				std::cout << str << std::setw(spacing - str.size()) << vtkVersion::GetVTKVersion() << std::endl;
 #else
-				std::cout << str << std::setw(spacing - str.size()) << "2" << std::endl;
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "OpenCV:";
+				std::cout << str << std::setw(spacing - str.size()) << CV_VERSION << std::endl;
+#if CV_MAJOR_VERSION >= 3
+				str = "With OpenCV xfeatures2d:";
+#ifdef HAVE_OPENCV_XFEATURES2D
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
 #endif
 				str = "With OpenCV nonfree:";
 #ifdef RTABMAP_NONFREE
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With ORB OcTree:";
+#ifdef RTABMAP_ORB_OCTREE
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With SuperPoint Torch:";
+#ifdef RTABMAP_SUPERPOINT_TORCH
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With Python3:";
+#ifdef RTABMAP_PYMATCHER
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With FastCV:";
+#ifdef RTABMAP_FASTCV
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With Madgwick:";
+#ifdef RTABMAP_MADGWICK
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
@@ -599,6 +673,12 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 #endif
 				str = "With CVSBA:";
 #ifdef RTABMAP_CVSBA
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With Ceres:";
+#ifdef RTABMAP_CERES
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
@@ -663,6 +743,12 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
 #endif
+				str = "With MYNT EYE S:";
+#ifdef RTABMAP_MYNTEYE
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
 				str = "With libpointmatcher:";
 #ifdef RTABMAP_POINTMATCHER
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
@@ -683,6 +769,12 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 #endif
 				str = "With open chisel:";
 #ifdef RTABMAP_OPENCHISEL
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With Alice Vision:";
+#ifdef RTABMAP_ALICE_VISION
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
@@ -725,6 +817,12 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 #endif
 				str = "With MSCKF_VIO:";
 #ifdef RTABMAP_MSCKF_VIO
+				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
+#else
+				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
+#endif
+				str = "With VINS-Fusion:";
+#ifdef RTABMAP_VINS
 				std::cout << str << std::setw(spacing - str.size()) << "true" << std::endl;
 #else
 				std::cout << str << std::setw(spacing - str.size()) << "false" << std::endl;
@@ -825,6 +923,43 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 		{
 			if(strcmp(argv[i], "--params") == 0)
 			{
+				if (i < argc - 1)
+				{
+					// If the last argument is a database, dump the parameters in INI format
+					std::string dbName = argv[argc - 1];
+					if (UFile::exists(dbName) && UFile::getExtension(dbName).compare("db") == 0)
+					{
+						DBDriver * driver = DBDriver::create();
+						bool read = false;
+						if (driver->openConnection(dbName))
+						{
+							ParametersMap dbParameters = driver->getLastParameters();
+							if (!dbParameters.empty())
+							{
+								std::cout << "[Core]" << std::endl;
+								std::cout << "Version = " << RTABMAP_VERSION << std::endl;
+								for (ParametersMap::const_iterator iter = dbParameters.begin(); iter != dbParameters.end(); ++iter)
+								{
+									std::string key = iter->first;
+									key = uReplaceChar(key, '/', '\\'); // Ini files use \ by default for separators, so replace the /
+
+									std::string value = iter->second.c_str();
+									value = uReplaceChar(value, '\\', '/'); // use always slash for values
+
+									std::cout << key << " = " << value << std::endl;
+								}
+								read = true;
+							}
+							driver->closeConnection(false);
+						}
+						delete driver;
+						if (read)
+						{
+							exit(0);
+						}
+					}
+				}
+
 				for(rtabmap::ParametersMap::const_iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
 				{
 					bool ignore = false;
@@ -890,8 +1025,6 @@ ParametersMap Parameters::parseArguments(int argc, char * argv[], bool onlyParam
 								std::endl;
 					}
 				}
-				UWARN("App will now exit after showing default RTAB-Map parameters because "
-						 "argument \"--params\" is detected!");
 				exit(0);
 			}
 			else
@@ -1045,15 +1178,41 @@ void Parameters::writeINI(const std::string & configFile, const ParametersMap & 
 	// Save current version
 	ini.SetValue("Core", "Version", RTABMAP_VERSION, NULL, true);
 
-	for(ParametersMap::const_iterator i=parameters.begin(); i!=parameters.end(); ++i)
+	for(ParametersMap::const_iterator iter=parameters.begin(); iter!=parameters.end(); ++iter)
 	{
-		std::string key = (*i).first;
+		std::string key = iter->first;
 		key = uReplaceChar(key, '/', '\\'); // Ini files use \ by default for separators, so replace the /
 		
-		std::string value = (*i).second.c_str();
+		std::string value = iter->second.c_str();
 		value = uReplaceChar(value, '\\', '/'); // use always slash for values
 
 		ini.SetValue("Core", key.c_str(), value.c_str(), NULL, true);
+	}
+
+	// Delete removed parameters
+	if(parameters.size() == getDefaultParameters().size())
+	{
+		for(std::map<std::string, std::pair<bool, std::string> >::const_iterator iter = removedParameters_.begin();
+			iter!=removedParameters_.end();
+			++iter)
+		{
+			std::string key = iter->first;
+			key = uReplaceChar(key, '/', '\\'); // Ini files use \ by default for separators, so replace the /
+
+			std::string value = ini.GetValue("Core", key.c_str(), "");
+
+			if(ini.Delete("Core", key.c_str(), true))
+			{
+				if(iter->second.first && parameters.find(iter->second.second) != parameters.end())
+				{
+					UWARN("Removed deprecated parameter %s=%s (replaced by %s=%s) from \"%s\".", iter->first.c_str(), value.c_str(), iter->second.second.c_str(), parameters.at(iter->second.second).c_str(), configFile.c_str());
+				}
+				else
+				{
+					UWARN("Removed deprecated parameter %s=%s from \"%s\".", iter->first.c_str(), value.c_str(), configFile.c_str());
+				}
+			}
+		}
 	}
 
 	ini.SaveFile(configFile.c_str());

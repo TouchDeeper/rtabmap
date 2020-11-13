@@ -7,11 +7,14 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map.Entry;
 
+import android.Manifest;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.preference.CheckBoxPreference;
 import android.preference.ListPreference;
 import android.preference.Preference;
 import android.preference.PreferenceActivity;
@@ -19,6 +22,7 @@ import android.text.InputType;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
+import android.widget.Toast;
 
 public class SettingsActivity extends PreferenceActivity implements OnSharedPreferenceChangeListener {
 	
@@ -34,7 +38,7 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
         	@Override
         	public boolean onPreferenceClick(Preference preference) {   
         		getPreferenceScreen().getSharedPreferences().edit().clear().commit();
-        		
+        	
                 recreate();
         		
         		return true;
@@ -184,7 +188,31 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
         	}
         });
         
+        Preference buttonGPS = findPreference(getString(R.string.pref_key_gps_saved));
+        buttonGPS.setOnPreferenceClickListener(new Preference.OnPreferenceClickListener() {
+        	@Override
+        	public boolean onPreferenceClick(Preference preference) {  
+        		if(((CustomSwitchPreference)preference).isChecked())
+        		{
+	        		if (!PermissionHelper.hasPermission(getActivity(), Manifest.permission.ACCESS_FINE_LOCATION)) {
+	        			((CustomSwitchPreference)preference).setChecked(false);
+	        			PermissionHelper.requestPermission(getActivity(), Manifest.permission.ACCESS_FINE_LOCATION);
+	        			return false;
+	        		}
+        		}
+        		return true;
+        	}
+        });
+        if(((CustomSwitchPreference)buttonGPS).isChecked())
+		{
+    		if (!PermissionHelper.hasPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)) {
+    			((CustomSwitchPreference)buttonGPS).setChecked(false);
+    			PermissionHelper.requestPermission(this, Manifest.permission.ACCESS_FINE_LOCATION);
+    		}
+		}
         
+        
+        ((Preference)findPreference(getString(R.string.pref_key_camera_driver))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_camera_driver))).getEntry() + ") "+getString(R.string.pref_summary_camera_driver));
         ((Preference)findPreference(getString(R.string.pref_key_density))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_density))).getEntry() + ") "+getString(R.string.pref_summary_density));
         ((Preference)findPreference(getString(R.string.pref_key_depth))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_depth))).getEntry() + ") "+getString(R.string.pref_summary_depth));
         ((Preference)findPreference(getString(R.string.pref_key_min_depth))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_min_depth))).getEntry() + ") "+getString(R.string.pref_summary_min_depth));
@@ -206,6 +234,8 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
         ((Preference)findPreference(getString(R.string.pref_key_features))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_features))).getEntry() + ") "+getString(R.string.pref_summary_features));
         ((Preference)findPreference(getString(R.string.pref_key_features_type))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_features_type))).getEntry() + ") "+getString(R.string.pref_summary_features_type));
         ((Preference)findPreference(getString(R.string.pref_key_optimizer))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_optimizer))).getEntry() + ") "+getString(R.string.pref_summary_optimizer));
+        ((Preference)findPreference(getString(R.string.pref_key_marker_detection))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_marker_detection))).getEntry() + ") "+getString(R.string.pref_summary_marker_detection));
+        ((Preference)findPreference(getString(R.string.pref_key_marker_detection_depth_error))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_marker_detection_depth_error))).getEntry() + ") "+getString(R.string.pref_summary_marker_detection_depth_error));
         
         ((Preference)findPreference(getString(R.string.pref_key_cloud_voxel))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_cloud_voxel))).getEntry() + ") "+getString(R.string.pref_summary_cloud_voxel));
         ((Preference)findPreference(getString(R.string.pref_key_texture_size))).setSummary("("+((ListPreference)findPreference(getString(R.string.pref_key_texture_size))).getEntry() + ") "+getString(R.string.pref_summary_texture_size));
@@ -226,6 +256,7 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
         Preference pref = findPreference(key);
 
         if (pref instanceof ListPreference) {
+        	if(key.compareTo(getString(R.string.pref_key_camera_driver))==0) pref.setSummary("("+ ((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_camera_driver));
         	if(key.compareTo(getString(R.string.pref_key_density))==0) pref.setSummary("("+ ((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_density));
         	if(key.compareTo(getString(R.string.pref_key_depth))==0) 
     		{
@@ -265,6 +296,8 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
         	if(key.compareTo(getString(R.string.pref_key_features))==0) pref.setSummary("("+((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_features));
         	if(key.compareTo(getString(R.string.pref_key_features_type))==0) pref.setSummary("("+((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_features_type));
         	if(key.compareTo(getString(R.string.pref_key_optimizer))==0) pref.setSummary("("+((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_optimizer));
+        	if(key.compareTo(getString(R.string.pref_key_marker_detection))==0) pref.setSummary("("+((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_marker_detection));
+        	if(key.compareTo(getString(R.string.pref_key_marker_detection_depth_error))==0) pref.setSummary("("+((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_marker_detection_depth_error));
         	
         	if(key.compareTo(getString(R.string.pref_key_cloud_voxel))==0) pref.setSummary("("+((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_cloud_voxel));
         	if(key.compareTo(getString(R.string.pref_key_texture_size))==0) pref.setSummary("("+((ListPreference)pref).getEntry() + ") "+getString(R.string.pref_summary_texture_size));
@@ -327,4 +360,28 @@ public class SettingsActivity extends PreferenceActivity implements OnSharedPref
 		}
 		ed.commit(); //save it.
     }
+    
+    @Override
+	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+
+		switch (requestCode) {
+			case PermissionHelper.ACCESS_FINE_LOCATION_CODE: {
+				// If request is cancelled, the result arrays are empty.
+				if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+					// permission was granted, yay! Do the
+					// contacts-related task you need to do.
+					Preference buttonGPS = findPreference(getString(R.string.pref_key_gps_saved));
+					((CustomSwitchPreference)buttonGPS).setChecked(true);
+				} else {
+					// permission denied, boo! Disable the
+					// functionality that depends on this permission.
+					Toast.makeText(this, "Location permission is needed to use GPS functionality", Toast.LENGTH_LONG).show();
+					if (!PermissionHelper.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION)) {
+						PermissionHelper.launchPermissionSettings(this); // Permission denied with checking "Do not ask again".
+					}
+				}
+				return;
+			}
+		}
+	}
 }

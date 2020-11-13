@@ -46,8 +46,16 @@ public:
 		kUserClosure,
 		kVirtualClosure,
 		kNeighborMerged,
-		kPosePrior,
+		kPosePrior, // Absolute pose in /world frame, From == To
+		kLandmark,  // Transform /base_link -­­> /landmark, "From" is node observing the landmark "To" (landmark is negative id)
+		kGravity,  // Orientation of the base frame accordingly to gravity (From == To)
+		kEnd,
+		kSelfRefLink = 97, // Include kPosePrior and kGravity (all links where From=To)
+		kAllWithLandmarks = 98,
+		kAllWithoutLandmarks = 99,
 		kUndef = 99};
+	static std::string typeName(Type type);
+
 	Link();
 	Link(int from,
 			int to,
@@ -56,15 +64,16 @@ public:
 			const cv::Mat & infMatrix = cv::Mat::eye(6,6,CV_64FC1), // information matrix: inverse of covariance matrix
 			const cv::Mat & userData = cv::Mat());
 
-	bool isValid() const {return from_ > 0 && to_ > 0 && !transform_.isNull() && type_!=kUndef;}
+	bool isValid() const {return from_ != 0 && to_ != 0 && !transform_.isNull() && type_!=kUndef;}
 
 	int from() const {return from_;}
 	int to() const {return to_;}
 	const Transform & transform() const {return transform_;}
 	Type type() const {return type_;}
+	std::string typeName() const {return typeName(type_);}
 	const cv::Mat & infMatrix() const {return infMatrix_;}
-	double rotVariance() const;
-	double transVariance() const;
+	double rotVariance(bool minimum = true) const;
+	double transVariance(bool minimum = true) const;
 
 	void setFrom(int from) {from_ = from;}
 	void setTo(int to) {to_ = to;}

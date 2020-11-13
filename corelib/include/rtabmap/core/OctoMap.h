@@ -84,6 +84,7 @@ class RtabmapColorOcTree : public octomap::OccupancyOcTreeBase <RtabmapColorOcTr
   public:
     /// Default constructor, sets resolution of leafs
 	RtabmapColorOcTree(double resolution);
+	virtual ~RtabmapColorOcTree() {}
 
     /// virtual constructor: creates a new object of same type
     /// (Covariant return type requires an up-to-date compiler)
@@ -184,7 +185,7 @@ public:
 			const cv::Mat & obstacles,
 			const cv::Mat & empty,
 			const cv::Point3f & viewPoint);
-	void update(const std::map<int, Transform> & poses);
+	bool update(const std::map<int, Transform> & poses); // return true if map has changed
 
 	const RtabmapColorOcTree * octree() const {return octree_;}
 
@@ -193,7 +194,9 @@ public:
 			std::vector<int> * obstacleIndices = 0,
 			std::vector<int> * emptyIndices = 0,
 			std::vector<int> * groundIndices = 0,
-			bool originalRefPoints = true) const;
+			bool originalRefPoints = true,
+			std::vector<int> * frontierIndices = 0,
+			std::vector<double> * cloudProb = 0) const;
 
 	cv::Mat createProjectionMap(
 			float & xMin,
@@ -223,7 +226,6 @@ private:
 	std::map<int, cv::Point3f> cacheViewPoints_;
 	RtabmapColorOcTree * octree_;
 	std::map<int, Transform> addedNodes_;
-	octomap::KeyRay keyRay_;
 	bool hasColor_;
 	bool fullUpdate_;
 	float updateError_;

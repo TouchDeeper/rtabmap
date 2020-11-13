@@ -48,18 +48,20 @@ namespace rtabmap {
 		public: \
 			Dummy##PREFIX##NAME() {if(!_defaultDataInitialized)_defaultData.insert(std::pair<std::string, float>(#PREFIX "/" #NAME "/" #UNIT, 0.0f));} \
 		}; \
-		Dummy##PREFIX##NAME dummy##PREFIX##NAME;
+		Dummy##PREFIX##NAME dummy##PREFIX##NAME
 
 class RTABMAP_EXP Statistics
 {
 	RTABMAP_STATS(Loop, RejectedHypothesis,);
 	RTABMAP_STATS(Loop, Accepted_hypothesis_id,);
+	RTABMAP_STATS(Loop, Suppressed_hypothesis_id,);
 	RTABMAP_STATS(Loop, Highest_hypothesis_id,);
 	RTABMAP_STATS(Loop, Highest_hypothesis_value,);
 	RTABMAP_STATS(Loop, Vp_hypothesis,);
 	RTABMAP_STATS(Loop, Reactivate_id,);
 	RTABMAP_STATS(Loop, Hypothesis_ratio,);
 	RTABMAP_STATS(Loop, Hypothesis_reactivated,);
+	RTABMAP_STATS(Loop, Visual_words,);
 	RTABMAP_STATS(Loop, Visual_inliers,);
 	RTABMAP_STATS(Loop, Visual_matches,);
 	RTABMAP_STATS(Loop, Last_id,);
@@ -69,6 +71,35 @@ class RTABMAP_EXP Statistics
 	RTABMAP_STATS(Loop, Optimization_iterations, );
 	RTABMAP_STATS(Loop, Linear_variance,);
 	RTABMAP_STATS(Loop, Angular_variance,);
+	RTABMAP_STATS(Loop, Landmark_detected,);
+	RTABMAP_STATS(Loop, Landmark_detected_node_ref,);
+	RTABMAP_STATS(Loop, Visual_inliers_mean_dist,m);
+	RTABMAP_STATS(Loop, Visual_inliers_distribution,);
+	//Odom correction
+	RTABMAP_STATS(Loop, Odom_correction_norm, m);
+	RTABMAP_STATS(Loop, Odom_correction_angle, deg);
+	RTABMAP_STATS(Loop, Odom_correction_x, m);
+	RTABMAP_STATS(Loop, Odom_correction_y, m);
+	RTABMAP_STATS(Loop, Odom_correction_z, m);
+	RTABMAP_STATS(Loop, Odom_correction_roll, deg);
+	RTABMAP_STATS(Loop, Odom_correction_pitch, deg);
+	RTABMAP_STATS(Loop, Odom_correction_yaw, deg);
+	// Map to Odom
+	RTABMAP_STATS(Loop, MapToOdom_norm, m);
+	RTABMAP_STATS(Loop, MapToOdom_angle, deg);
+	RTABMAP_STATS(Loop, MapToOdom_x, m);
+	RTABMAP_STATS(Loop, MapToOdom_y, m);
+	RTABMAP_STATS(Loop, MapToOdom_z, m);
+	RTABMAP_STATS(Loop, MapToOdom_roll, deg);
+	RTABMAP_STATS(Loop, MapToOdom_pitch, deg);
+	RTABMAP_STATS(Loop, MapToOdom_yaw, deg);
+	// Map to Base
+	RTABMAP_STATS(Loop, MapToBase_x, m);
+	RTABMAP_STATS(Loop, MapToBase_y, m);
+	RTABMAP_STATS(Loop, MapToBase_z, m);
+	RTABMAP_STATS(Loop, MapToBase_roll, deg);
+	RTABMAP_STATS(Loop, MapToBase_pitch, deg);
+	RTABMAP_STATS(Loop, MapToBase_yaw, deg);
 
 	RTABMAP_STATS(Proximity, Time_detections,);
 	RTABMAP_STATS(Proximity, Space_last_detection_id,);
@@ -127,6 +158,7 @@ class RTABMAP_EXP Statistics
 	RTABMAP_STATS(Timing, Forgetting, ms);
 	RTABMAP_STATS(Timing, Joining_trash, ms);
 	RTABMAP_STATS(Timing, Emptying_trash, ms);
+	RTABMAP_STATS(Timing, Finalizing_statistics, ms);
 
 	RTABMAP_STATS(TimingMem, Pre_update, ms);
 	RTABMAP_STATS(TimingMem, Signature_creation, ms);
@@ -144,8 +176,10 @@ class RTABMAP_EXP Statistics
 	RTABMAP_STATS(TimingMem, Post_decimation, ms);
 	RTABMAP_STATS(TimingMem, Scan_filtering, ms);
 	RTABMAP_STATS(TimingMem, Occupancy_grid, ms);
+	RTABMAP_STATS(TimingMem, Markers_detection, ms);
 
 	RTABMAP_STATS(Keypoint, Dictionary_size, words);
+	RTABMAP_STATS(Keypoint, Current_frame, words);
 	RTABMAP_STATS(Keypoint, Indexed_words, words);
 	RTABMAP_STATS(Keypoint, Index_memory_usage, KB);
 
@@ -161,6 +195,8 @@ class RTABMAP_EXP Statistics
 	RTABMAP_STATS(Gt, Rotational_std, deg);
 	RTABMAP_STATS(Gt, Rotational_min, deg);
 	RTABMAP_STATS(Gt, Rotational_max, deg);
+	RTABMAP_STATS(Gt, Localization_linear_error, m);
+	RTABMAP_STATS(Gt, Localization_angular_error, deg);
 
 public:
 	static const std::map<std::string, float> & defaultData();
@@ -176,18 +212,22 @@ public:
 
 	// setters
 	void setExtended(bool extended) {_extended = extended;}
-	void setRefImageId(int refImageId) {_refImageId = refImageId;}
-	void setLoopClosureId(int loopClosureId) {_loopClosureId = loopClosureId;}
+	void setRefImageId(int id) {_refImageId = id;}
+	void setRefImageMapId(int id) {_refImageMapId = id;}
+	void setLoopClosureId(int id) {_loopClosureId = id;}
+	void setLoopClosureMapId(int id) {_loopClosureMapId = id;}
 	void setProximityDetectionId(int id) {_proximiyDetectionId = id;}
+	void setProximityDetectionMapId(int id) {_proximiyDetectionMapId = id;}
 	void setStamp(double stamp) {_stamp = stamp;}
 
-	void setSignatures(const std::map<int, Signature> & signatures) {_signatures = signatures;}
+	void setLastSignatureData(const Signature & data) {_lastSignatureData = data;}
 
 	void setPoses(const std::map<int, Transform> & poses) {_poses = poses;}
 	void setConstraints(const std::multimap<int, Link> & constraints) {_constraints = constraints;}
 	void setMapCorrection(const Transform & mapCorrection) {_mapCorrection = mapCorrection;}
 	void setLoopClosureTransform(const Transform & loopClosureTransform) {_loopClosureTransform = loopClosureTransform;}
 	void setLocalizationCovariance(const cv::Mat & covariance) {_localizationCovariance = covariance;}
+	void setLabels(const std::map<int, std::string> & labels) {_labels = labels;}
 	void setWeights(const std::map<int, int> & weights) {_weights = weights;}
 	void setPosterior(const std::map<int, float> & posterior) {_posterior = posterior;}
 	void setLikelihood(const std::map<int, float> & likelihood) {_likelihood = likelihood;}
@@ -200,17 +240,21 @@ public:
 	// getters
 	bool extended() const {return _extended;}
 	int refImageId() const {return _refImageId;}
+	int refImageMapId() const {return _refImageMapId;}
 	int loopClosureId() const {return _loopClosureId;}
+	int loopClosureMapId() const {return _loopClosureMapId;}
 	int proximityDetectionId() const {return _proximiyDetectionId;}
+	int proximityDetectionMapId() const {return _proximiyDetectionMapId;}
 	double stamp() const {return _stamp;}
 
-	const std::map<int, Signature> & getSignatures() const {return _signatures;}
+	const Signature & getLastSignatureData() const {return _lastSignatureData;}
 
 	const std::map<int, Transform> & poses() const {return _poses;}
 	const std::multimap<int, Link> & constraints() const {return _constraints;}
 	const Transform & mapCorrection() const {return _mapCorrection;}
 	const Transform & loopClosureTransform() const {return _loopClosureTransform;}
 	const cv::Mat & localizationCovariance() const {return _localizationCovariance;}
+	const std::map<int, std::string> & labels() const {return _labels;}
 	const std::map<int, int> & weights() const {return _weights;}
 	const std::map<int, float> & posterior() const {return _posterior;}
 	const std::map<int, float> & likelihood() const {return _likelihood;}
@@ -226,11 +270,14 @@ private:
 	bool _extended; // 0 -> only loop closure and last signature ID fields are filled
 
 	int _refImageId;
+	int _refImageMapId;
 	int _loopClosureId;
+	int _loopClosureMapId;
 	int _proximiyDetectionId;
+	int _proximiyDetectionMapId;
 	double _stamp;
 
-	std::map<int, Signature> _signatures;
+	Signature _lastSignatureData;
 
 	std::map<int, Transform> _poses;
 	std::multimap<int, Link> _constraints;
@@ -238,6 +285,7 @@ private:
 	Transform _loopClosureTransform;
 	cv::Mat _localizationCovariance;
 
+	std::map<int, std::string> _labels;
 	std::map<int, int> _weights;
 	std::map<int, float> _posterior;
 	std::map<int, float> _likelihood;

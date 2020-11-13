@@ -25,7 +25,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <rtabmap/core/OdometryF2M.h>
+#include <rtabmap/core/Odometry.h>
 #include "rtabmap/core/Rtabmap.h"
 #include "rtabmap/core/RtabmapThread.h"
 #include "rtabmap/core/CameraRGBD.h"
@@ -169,7 +169,7 @@ int main(int argc, char * argv[])
 	MapBuilder mapBuilder(&cameraThread);
 
 	// Create an odometry thread to process camera events, it will send OdometryEvent.
-	OdometryThread odomThread(new OdometryF2M());
+	OdometryThread odomThread(Odometry::create());
 
 
 	ParametersMap params;
@@ -216,7 +216,7 @@ int main(int argc, char * argv[])
 	std::map<int, Signature> nodes;
 	std::map<int, Transform> optimizedPoses;
 	std::multimap<int, Link> links;
-	rtabmap->get3DMap(nodes, optimizedPoses, links, true, true);
+	rtabmap->getGraph(optimizedPoses, links, true, true, &nodes, true, true, true, true);
 	pcl::PointCloud<pcl::PointXYZRGB>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZRGB>);
 	for(std::map<int, Transform>::iterator iter=optimizedPoses.begin(); iter!=optimizedPoses.end(); ++iter)
 	{

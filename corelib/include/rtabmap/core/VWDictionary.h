@@ -55,6 +55,23 @@ public:
 		kNNUndef};
 	static const int ID_START;
 	static const int ID_INVALID;
+	static std::string nnStrategyName(NNStrategy strategy)
+	{
+		switch(strategy) {
+		case kNNFlannNaive:
+			return "FLANN NAIVE";
+		case kNNFlannKdTree:
+			return "FLANN KD-TREE";
+		case kNNFlannLSH:
+			return "FLANN LSH";
+		case kNNBruteForce:
+			return "BRUTE FORCE";
+		case kNNBruteForceGPU:
+			return "BRUTE FORCE GPU";
+		default:
+			return "Unknown";
+		}
+	}
 
 public:
 	VWDictionary(const ParametersMap & parameters = ParametersMap());
@@ -99,6 +116,10 @@ public:
 	void removeWords(const std::vector<VisualWord*> & words); // caller must delete the words
 	void deleteUnusedWords();
 
+public:
+	static cv::Mat convertBinTo32F(const cv::Mat & descriptorsIn);
+	static cv::Mat convert32FToBin(const cv::Mat & descriptorsIn);
+
 protected:
 	int getNextId();
 
@@ -111,7 +132,8 @@ private:
 	bool _incrementalFlann;
 	float _rebalancingFactor;
 	float _nndrRatio;
-	std::string _dictionaryPath; // a pre-computed dictionary (.txt)
+	std::string _dictionaryPath; // a pre-computed dictionary (.txt or .db)
+	std::string _newDictionaryPath; // a pre-computed dictionary (.txt or .db)
 	bool _newWordsComparedTogether;
 	int _lastWordId;
 	bool useDistanceL1_;

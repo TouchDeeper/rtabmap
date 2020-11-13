@@ -57,6 +57,7 @@ class RegistrationInfo;
 class RegistrationIcp;
 class Stereo;
 class OccupancyGrid;
+class MarkerDetector;
 
 class RTABMAP_EXP Memory
 {
@@ -92,7 +93,7 @@ public:
 	std::set<int> reactivateSignatures(const std::list<int> & ids, unsigned int maxLoaded, double & timeDbAccess);
 
 	int cleanup();
-	void saveStatistics(const Statistics & statistics);
+	void saveStatistics(const Statistics & statistics, bool saveWMState);
 	void savePreviewImage(const cv::Mat & image) const;
 	cv::Mat loadPreviewImage() const;
 	void saveOptimizedPoses(const std::map<int, Transform> & optimizedPoses, const Transform & lastlocalizationPose) const;
@@ -146,21 +147,27 @@ public:
 	const std::map<int, double> & getWorkingMem() const {return _workingMem;}
 	const std::set<int> & getStMem() const {return _stMem;}
 	int getMaxStMemSize() const {return _maxStMemSize;}
-	std::map<int, Link> getNeighborLinks(int signatureId,
+	std::multimap<int, Link> getNeighborLinks(int signatureId,
 			bool lookInDatabase = false) const;
-	std::map<int, Link> getLoopClosureLinks(int signatureId,
+	std::multimap<int, Link> getLoopClosureLinks(int signatureId,
 			bool lookInDatabase = false) const;
-	std::map<int, Link> getLinks(int signatureId,
-			bool lookInDatabase = false) const;
-	std::multimap<int, Link> getAllLinks(bool lookInDatabase, bool ignoreNullLinks = true) const;
+	std::multimap<int, Link> getLinks(int signatureId, // can be also used to get links from landmarks
+			bool lookInDatabase = false,
+			bool withLandmarks = false) const;
+	std::multimap<int, Link> getAllLinks(bool lookInDatabase, bool ignoreNullLinks = true, bool withLandmarks = false) const;
 	bool isBinDataKept() const {return _binDataKept;}
 	float getSimilarityThreshold() const {return _similarityThreshold;}
 	std::map<int, int> getWeights() const;
 	int getLastSignatureId() const;
 	const Signature * getLastWorkingSignature() const;
+	std::map<int, Link> getNodesObservingLandmark(int landmarkId, bool lookInDatabase) const;
 	int getSignatureIdByLabel(const std::string & label, bool lookInDatabase = true) const;
 	bool labelSignature(int id, const std::string & label);
-	std::map<int, std::string> getAllLabels() const;
+	const std::map<int, std::string> & getAllLabels() const {return _labels;}
+	const std::map<int, std::set<int> > & getLandmarksIndex() const {return _landmarksIndex;}
+	const std::map<int, std::set<int> > & getLandmarksInvertedIndex() const {return _landmarksInvertedIndex;}
+	bool allNodesInWM() const {return _allNodesInWM;}
+
 	/**
 	 * Set user data. Detect automatically if raw or compressed. If raw, the data is
 	 * compressed too. A matrix of type CV_8UC1 with 1 row is considered as compressed.
@@ -173,8 +180,11 @@ public:
 	std::string getDatabaseVersion() const;
 	std::string getDatabaseUrl() const;
 	double getDbSavingTime() const;
+	int getMapId(int id, bool lookInDatabase = false) const;
 	Transform getOdomPose(int signatureId, bool lookInDatabase = false) const;
 	Transform getGroundTruthPose(int signatureId, bool lookInDatabase = false) const;
+	const std::map<int, Transform> & getGroundTruths() const {return _groundTruths;} // only those in working+STM memory
+	void getGPS(int id, GPS & gps, Transform & offsetENU, bool lookInDatabase, int maxGraphDepth = 0) const;
 	bool getNodeInfo(int signatureId,
 			Transform & odomPose,
 			int & mapId,
@@ -184,20 +194,22 @@ public:
 			Transform & groundTruth,
 			std::vector<float> & velocity,
 			GPS & gps,
+			EnvSensors & sensors,
 			bool lookInDatabase = false) const;
 	cv::Mat getImageCompressed(int signatureId) const;
-	SensorData getNodeData(int nodeId, bool uncompressedData = false) const;
-	void getNodeWords(int nodeId,
+	SensorData getNodeData(int locationId, bool images, bool scan, bool userData, bool occupancyGrid) const;
+	void getNodeWordsAndGlobalDescriptors(int nodeId,
 			std::multimap<int, cv::KeyPoint> & words,
 			std::multimap<int, cv::Point3f> & words3,
-			std::multimap<int, cv::Mat> & wordsDescriptors);
+			std::multimap<int, cv::Mat> & wordsDescriptors,
+			std::vector<GlobalDescriptor> & globalDescriptors) const;
 	void getNodeCalibration(int nodeId,
 			std::vector<CameraModel> & models,
-			StereoCameraModel & stereoModel);
-	SensorData getSignatureDataConst(int locationId, bool images = true, bool scan = true, bool userData = true, bool occupancyGrid = true) const;
-	std::set<int> getAllSignatureIds() const;
+			StereoCameraModel & stereoModel) const;
+	std::set<int> getAllSignatureIds(bool ignoreChildren = true) const;
 	bool memoryChanged() const {return _memoryChanged;}
 	bool isIncremental() const {return _incrementalMemory;}
+	bool isLocalizationDataSaved() const {return _localizationDataSaved;}
 	const Signature * getSignature(int id) const;
 	bool isInSTM(int signatureId) const {return _stMem.find(signatureId) != _stMem.end();}
 	bool isInWM(int signatureId) const {return _workingMem.find(signatureId) != _workingMem.end();}
@@ -206,6 +218,8 @@ public:
 	int getLastGlobalLoopClosureId() const {return _lastGlobalLoopClosureId;}
 	const Feature2D * getFeature2D() const {return _feature2D;}
 	bool isGraphReduced() const {return _reduceGraph;}
+	const std::vector<double> & getOdomMaxInf() const {return _odomMaxInf;}
+	bool isOdomGravityUsed() const {return _useOdometryGravity;}
 
 	void dumpMemoryTree(const char * fileNameTree) const;
 	virtual void dumpMemory(std::string directory) const;
@@ -222,7 +236,8 @@ public:
 			const std::set<int> & ids,
 			std::map<int, Transform> & poses,
 			std::multimap<int, Link> & links,
-			bool lookInDatabase = false);
+			bool lookInDatabase = false,
+			bool landmarksAdded = false);
 
 	Transform computeTransform(Signature & fromS, Signature & toS, Transform guess, RegistrationInfo * info = 0, bool useKnownCorrespondencesIfPossible = false) const;
 	Transform computeTransform(int fromId, int toId, Transform guess, RegistrationInfo * info = 0, bool useKnownCorrespondencesIfPossible = false);
@@ -275,7 +290,9 @@ private:
 	bool _saveDepth16Format;
 	bool _notLinkedNodesKeptInDb;
 	bool _saveIntermediateNodeData;
+	std::string _rgbCompressionFormat;
 	bool _incrementalMemory;
+	bool _localizationDataSaved;
 	bool _reduceGraph;
 	int _maxStMemSize;
 	float _recentWmRatio;
@@ -285,6 +302,7 @@ private:
 	bool _badSignaturesIgnored;
 	bool _mapLabelsAdded;
 	bool _depthAsMask;
+	bool _stereoFromMotion;
 	int _imagePreDecimation;
 	int _imagePostDecimation;
 	bool _compressionParallelized;
@@ -298,12 +316,15 @@ private:
 	float _rehearsalMaxAngle;
 	bool _rehearsalWeightIgnoredWhileMoving;
 	bool _useOdometryFeatures;
+	bool _useOdometryGravity;
 	bool _createOccupancyGrid;
 	int _visMaxFeatures;
-	int _visCorType;
 	bool _imagesAlreadyRectified;
 	bool _rectifyOnlyFeatures;
 	bool _covOffDiagonalIgnored;
+	bool _detectMarkers;
+	float _markerLinVariance;
+	float _markerAngVariance;
 
 	int _idCount;
 	int _idMapCount;
@@ -312,18 +333,24 @@ private:
 	bool _memoryChanged; // False by default, become true only when Memory::update() is called.
 	bool _linksChanged; // False by default, become true when links are modified.
 	int _signaturesAdded;
+	bool _allNodesInWM;
 	GPS _gpsOrigin;
 	std::vector<CameraModel> _rectCameraModels;
 	StereoCameraModel _rectStereoCameraModel;
+	std::vector<double> _odomMaxInf;
 
 	std::map<int, Signature *> _signatures; // TODO : check if a signature is already added? although it is not supposed to occur...
 	std::set<int> _stMem; // id
 	std::map<int, double> _workingMem; // id,age
+	std::map<int, Transform> _groundTruths;
+	std::map<int, std::string> _labels;
+	std::map<int, std::set<int> > _landmarksIndex;         // <nodeId, landmarkIds>
+	std::map<int, std::set<int> > _landmarksInvertedIndex; // <landmarkId, nodeIds>
 
 	//Keypoint stuff
 	VWDictionary * _vwd;
 	Feature2D * _feature2D;
-	float _badSignRatio;;
+	float _badSignRatio;
 	bool _tfIdfLikelihoodUsed;
 	bool _parallelized;
 
@@ -331,6 +358,8 @@ private:
 	RegistrationIcp * _registrationIcpMulti;
 
 	OccupancyGrid * _occupancy;
+
+	MarkerDetector * _markerDetector;
 };
 
 } // namespace rtabmap

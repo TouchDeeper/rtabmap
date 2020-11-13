@@ -58,10 +58,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pcl/segmentation/impl/extract_labeled_clusters.hpp>
 #include <pcl/filters/impl/extract_indices.hpp>
 
-PCL_INSTANTIATE(EuclideanClusterExtraction, (pcl::PointXYZRGBNormal))
-PCL_INSTANTIATE(extractEuclideanClusters, (pcl::PointXYZRGBNormal))
-PCL_INSTANTIATE(extractEuclideanClusters_indices, (pcl::PointXYZRGBNormal))
-PCL_INSTANTIATE(ExtractIndices, (pcl::PointNormal))
+PCL_INSTANTIATE(EuclideanClusterExtraction, (pcl::PointXYZRGBNormal));
+PCL_INSTANTIATE(extractEuclideanClusters, (pcl::PointXYZRGBNormal));
+PCL_INSTANTIATE(extractEuclideanClusters_indices, (pcl::PointXYZRGBNormal));
+PCL_INSTANTIATE(ExtractIndices, (pcl::PointNormal));
 
 #endif
 
@@ -130,7 +130,27 @@ LaserScan commonFiltering(
 			}
 			int previousSize = scan.size();
 			int scanMaxPtsTmp = scan.maxPoints();
-			scan = LaserScan(cv::Mat(tmp, cv::Range::all(), cv::Range(0, oi)), scanMaxPtsTmp/downsamplingStep, rangeMax>0.0f&&rangeMax<scan.maxRange()?rangeMax:scan.maxRange(), scan.format(), scan.localTransform());
+			if(scan.angleIncrement() > 0.0f)
+			{
+				scan = LaserScan(
+						cv::Mat(tmp, cv::Range::all(), cv::Range(0, oi)),
+						scan.format(),
+						rangeMin>0.0f&&rangeMin>scan.rangeMin()?rangeMin:scan.rangeMin(),
+						rangeMax>0.0f&&rangeMax<scan.rangeMax()?rangeMax:scan.rangeMax(),
+						scan.angleMin(),
+						scan.angleMax(),
+						scan.angleIncrement() * (float)downsamplingStep,
+						scan.localTransform());
+			}
+			else
+			{
+				scan = LaserScan(
+						cv::Mat(tmp, cv::Range::all(), cv::Range(0, oi)),
+						scanMaxPtsTmp/downsamplingStep,
+						rangeMax>0.0f&&rangeMax<scan.rangeMax()?rangeMax:scan.rangeMax(),
+						scan.format(),
+						scan.localTransform());
+			}
 			UDEBUG("Downsampling scan (step=%d): %d -> %d (scanMaxPts=%d->%d)", downsamplingStep, previousSize, scan.size(), scanMaxPtsTmp, scan.maxPoints());
 		}
 
@@ -154,16 +174,16 @@ LaserScan commonFiltering(
 					if(cloud->size() && (normalK > 0 || normalRadius>0.0f))
 					{
 						pcl::PointCloud<pcl::Normal>::Ptr normals = util3d::computeNormals(cloud, normalK, normalRadius);
-						scan = LaserScan(laserScanFromPointCloud(*cloud, *normals), scanMaxPts, scan.maxRange(), LaserScan::kXYZRGBNormal, scan.localTransform());
+						scan = LaserScan(laserScanFromPointCloud(*cloud, *normals), scanMaxPts, scan.rangeMax(), LaserScan::kXYZRGBNormal, scan.localTransform());
 						UDEBUG("Normals computed (k=%d radius=%f)", normalK, normalRadius);
 					}
 					else
 					{
 						if(scan.hasNormals())
 						{
-							UWARN("Voxel filter i applied, but normal parameters are not set and input scan has normals. The returned scan has no normals.");
+							UWARN("Voxel filter is applied, but normal parameters are not set and input scan has normals. The returned scan has no normals.");
 						}
-						scan = LaserScan(laserScanFromPointCloud(*cloud), scanMaxPts, scan.maxRange(), LaserScan::kXYZRGB, scan.localTransform());
+						scan = LaserScan(laserScanFromPointCloud(*cloud), scanMaxPts, scan.rangeMax(), LaserScan::kXYZRGB, scan.localTransform());
 					}
 				}
 			}
@@ -186,12 +206,19 @@ LaserScan commonFiltering(
 						if(scan.is2d())
 						{
 							normals = util3d::computeNormals2D(cloud, normalK, normalRadius);
-							scan = LaserScan(laserScan2dFromPointCloud(*cloud, *normals), scanMaxPts, scan.maxRange(), LaserScan::kXYINormal, scan.localTransform());
+							if(voxelSize == 0.0f && scan.angleIncrement() > 0.0f)
+							{
+								scan = LaserScan(laserScan2dFromPointCloud(*cloud, *normals), LaserScan::kXYINormal, scan.rangeMin(), scan.rangeMax(), scan.angleMin(), scan.angleMax(), scan.angleIncrement(), scan.localTransform());
+							}
+							else
+							{
+								scan = LaserScan(laserScan2dFromPointCloud(*cloud, *normals), scanMaxPts, scan.rangeMax(), LaserScan::kXYINormal, scan.localTransform());
+							}
 						}
 						else
 						{
 							normals = util3d::computeNormals(cloud, normalK, normalRadius);
-							scan = LaserScan(laserScanFromPointCloud(*cloud, *normals), scanMaxPts, scan.maxRange(), LaserScan::kXYZINormal, scan.localTransform());
+							scan = LaserScan(laserScanFromPointCloud(*cloud, *normals), scanMaxPts, scan.rangeMax(), LaserScan::kXYZINormal, scan.localTransform());
 						}
 						UDEBUG("Normals computed (k=%d radius=%f)", normalK, normalRadius);
 					}
@@ -203,11 +230,11 @@ LaserScan commonFiltering(
 						}
 						if(scan.is2d())
 						{
-							scan = LaserScan(laserScan2dFromPointCloud(*cloud), scanMaxPts, scan.maxRange(), LaserScan::kXYI, scan.localTransform());
+							scan = LaserScan(laserScan2dFromPointCloud(*cloud), scanMaxPts, scan.rangeMax(), LaserScan::kXYI, scan.localTransform());
 						}
 						else
 						{
-							scan = LaserScan(laserScanFromPointCloud(*cloud), scanMaxPts, scan.maxRange(), LaserScan::kXYZI, scan.localTransform());
+							scan = LaserScan(laserScanFromPointCloud(*cloud), scanMaxPts, scan.rangeMax(), LaserScan::kXYZI, scan.localTransform());
 						}
 					}
 				}
@@ -231,12 +258,19 @@ LaserScan commonFiltering(
 						if(scan.is2d())
 						{
 							normals = util3d::computeNormals2D(cloud, normalK, normalRadius);
-							scan = LaserScan(laserScan2dFromPointCloud(*cloud, *normals), scanMaxPts, scan.maxRange(), LaserScan::kXYNormal, scan.localTransform());
+							if(voxelSize == 0.0f && scan.angleIncrement() > 0.0f)
+							{
+								scan = LaserScan(laserScan2dFromPointCloud(*cloud, *normals), LaserScan::kXYNormal, scan.rangeMin(), scan.rangeMax(), scan.angleMin(), scan.angleMax(), scan.angleIncrement(), scan.localTransform());
+							}
+							else
+							{
+								scan = LaserScan(laserScan2dFromPointCloud(*cloud, *normals), scanMaxPts, scan.rangeMax(), LaserScan::kXYNormal, scan.localTransform());
+							}
 						}
 						else
 						{
 							normals = util3d::computeNormals(cloud, normalK, normalRadius);
-							scan = LaserScan(laserScanFromPointCloud(*cloud, *normals), scanMaxPts, scan.maxRange(), LaserScan::kXYZNormal, scan.localTransform());
+							scan = LaserScan(laserScanFromPointCloud(*cloud, *normals), scanMaxPts, scan.rangeMax(), LaserScan::kXYZNormal, scan.localTransform());
 						}
 						UDEBUG("Normals computed (k=%d radius=%f)", normalK, normalRadius);
 					}
@@ -248,11 +282,11 @@ LaserScan commonFiltering(
 						}
 						if(scan.is2d())
 						{
-							scan = LaserScan(laserScan2dFromPointCloud(*cloud), scanMaxPts, scan.maxRange(), LaserScan::kXY, scan.localTransform());
+							scan = LaserScan(laserScan2dFromPointCloud(*cloud), scanMaxPts, scan.rangeMax(), LaserScan::kXY, scan.localTransform());
 						}
 						else
 						{
-							scan = LaserScan(laserScanFromPointCloud(*cloud), scanMaxPts, scan.maxRange(), LaserScan::kXYZ, scan.localTransform());
+							scan = LaserScan(laserScanFromPointCloud(*cloud), scanMaxPts, scan.rangeMax(), LaserScan::kXYZ, scan.localTransform());
 						}
 					}
 				}
@@ -307,7 +341,11 @@ LaserScan rangeFiltering(
 				cv::Mat(scan.data(), cv::Range::all(), cv::Range(i,i+1)).copyTo(cv::Mat(output, cv::Range::all(), cv::Range(oi,oi+1)));
 				++oi;
 			}
-			return LaserScan(cv::Mat(output, cv::Range::all(), cv::Range(0, oi)), scan.maxPoints(), scan.maxRange(), scan.format(), scan.localTransform());
+			if(scan.angleIncrement() > 0.0f)
+			{
+				return LaserScan(cv::Mat(output, cv::Range::all(), cv::Range(0, oi)), scan.format(), scan.rangeMin(), scan.rangeMax(), scan.angleMin(), scan.angleMax(), scan.angleIncrement(), scan.localTransform());
+			}
+			return LaserScan(cv::Mat(output, cv::Range::all(), cv::Range(0, oi)), scan.maxPoints(), scan.rangeMax(), scan.format(), scan.localTransform());
 		}
 	}
 
@@ -334,7 +372,11 @@ LaserScan downsample(
 			cv::Mat(scan.data(), cv::Range::all(), cv::Range(i,i+1)).copyTo(cv::Mat(output, cv::Range::all(), cv::Range(oi,oi+1)));
 			++oi;
 		}
-		return LaserScan(output, scan.maxPoints()/step, scan.maxRange(), scan.format(), scan.localTransform());
+		if(scan.angleIncrement() > 0.0f)
+		{
+			return LaserScan(output, scan.format(), scan.rangeMin(), scan.rangeMax(), scan.angleMin(), scan.angleMax(), scan.angleIncrement()*step, scan.localTransform());
+		}
+		return LaserScan(output, scan.maxPoints()/step, scan.rangeMax(), scan.format(), scan.localTransform());
 	}
 }
 template<typename PointT>
@@ -351,12 +393,61 @@ typename pcl::PointCloud<PointT>::Ptr downsampleImpl(
 	}
 	else
 	{
-		int finalSize = int(cloud->size())/step;
-		output->resize(finalSize);
-		int oi = 0;
-		for(unsigned int i=0; i<cloud->size()-step+1; i+=step)
+		if(cloud->height > 1 && cloud->height < cloud->width/4)
 		{
-			(*output)[oi++] = cloud->at(i);
+			// Assuming ouster point cloud (e.g, 2048x64),
+			// for which the lower dimension is the number of rings.
+			// Downsample each ring by the step.
+			// Example data packed:
+			// <ringA-1, ringB-1, ringC-1, ringD-1;
+			//  ringA-2, ringB-2, ringC-2, ringD-2;
+			//  ringA-3, ringB-3, ringC-3, ringD-3;
+			//  ringA-4, ringB-4, ringC-4, ringD-4>
+			unsigned int rings = cloud->height<cloud->width?cloud->height:cloud->width;
+			unsigned int pts = cloud->height>cloud->width?cloud->height:cloud->width;
+			unsigned int finalSize = rings * pts/step;
+			output->resize(finalSize);
+			output->width =  rings;
+			output->height = pts/step;
+
+			for(unsigned int j=0; j<rings; ++j)
+			{
+				for(unsigned int i=0; i<output->height; ++i)
+				{
+					(*output)[i*rings + j] = cloud->at(i*step*rings + j);
+				}
+			}
+
+		}
+		else if(cloud->height > 1)
+		{
+			// assume depth image (e.g., 640x480), downsample like an image
+			UASSERT_MSG(cloud->height % step == 0 && cloud->width % step == 0,
+					uFormat("Decimation of depth images should be exact! (decimation=%d, size=%dx%d)",
+					step, cloud->width, cloud->height).c_str());
+
+			int finalSize = cloud->height/step * cloud->width/step;
+			output->resize(finalSize);
+			output->width = cloud->width/step;
+			output->height = cloud->height/step;
+
+			for(unsigned int j=0; j<output->height; ++j)
+			{
+				for(unsigned int i=0; i<output->width; ++i)
+				{
+					output->at(j*output->width + i) = cloud->at(j*output->width*step + i*step);
+				}
+			}
+		}
+		else
+		{
+			int finalSize = int(cloud->size())/step;
+			output->resize(finalSize);
+			int oi = 0;
+			for(unsigned int i=0; i<cloud->size()-step+1; i+=step)
+			{
+				(*output)[oi++] = cloud->at(i);
+			}
 		}
 	}
 	return output;
@@ -369,6 +460,10 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr downsample(const pcl::PointCloud<pcl::Poi
 {
 	return downsampleImpl<pcl::PointXYZRGB>(cloud, step);
 }
+pcl::PointCloud<pcl::PointXYZI>::Ptr downsample(const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud, int step)
+{
+	return downsampleImpl<pcl::PointXYZI>(cloud, step);
+}
 pcl::PointCloud<pcl::PointNormal>::Ptr downsample(const pcl::PointCloud<pcl::PointNormal>::Ptr & cloud, int step)
 {
 	return downsampleImpl<pcl::PointNormal>(cloud, step);
@@ -376,6 +471,10 @@ pcl::PointCloud<pcl::PointNormal>::Ptr downsample(const pcl::PointCloud<pcl::Poi
 pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr downsample(const pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr & cloud, int step)
 {
 	return downsampleImpl<pcl::PointXYZRGBNormal>(cloud, step);
+}
+pcl::PointCloud<pcl::PointXYZINormal>::Ptr downsample(const pcl::PointCloud<pcl::PointXYZINormal>::Ptr & cloud, int step)
+{
+	return downsampleImpl<pcl::PointXYZINormal>(cloud, step);
 }
 
 template<typename PointT>
@@ -600,6 +699,24 @@ pcl::IndicesPtr cropBoxImpl(
 	return output;
 }
 
+pcl::IndicesPtr cropBox(const pcl::PCLPointCloud2::Ptr & cloud, const pcl::IndicesPtr & indices, const Eigen::Vector4f & min, const Eigen::Vector4f & max, const Transform & transform, bool negative)
+{
+	UASSERT(min[0] < max[0] && min[1] < max[1] && min[2] < max[2]);
+
+	pcl::IndicesPtr output(new std::vector<int>);
+	pcl::CropBox<pcl::PCLPointCloud2> filter;
+	filter.setNegative(negative);
+	filter.setMin(min);
+	filter.setMax(max);
+	if(!transform.isNull() && !transform.isIdentity())
+	{
+		filter.setTransform(transform.toEigen3f());
+	}
+	filter.setInputCloud(cloud);
+	filter.setIndices(indices);
+	filter.filter(*output);
+	return output;
+}
 pcl::IndicesPtr cropBox(const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud, const pcl::IndicesPtr & indices, const Eigen::Vector4f & min, const Eigen::Vector4f & max, const Transform & transform, bool negative)
 {
 	return cropBoxImpl<pcl::PointXYZ>(cloud, indices, min, max, transform, negative);
@@ -750,6 +867,10 @@ pcl::PointCloud<pcl::PointXYZRGB>::Ptr removeNaNFromPointCloud(const pcl::PointC
 {
 	return removeNaNFromPointCloudImpl<pcl::PointXYZRGB>(cloud);
 }
+pcl::PointCloud<pcl::PointXYZI>::Ptr removeNaNFromPointCloud(const pcl::PointCloud<pcl::PointXYZI>::Ptr & cloud)
+{
+	return removeNaNFromPointCloudImpl<pcl::PointXYZI>(cloud);
+}
 
 template<typename PointT>
 typename pcl::PointCloud<PointT>::Ptr removeNaNNormalsFromPointCloudImpl(
@@ -769,6 +890,11 @@ pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr removeNaNNormalsFromPointCloud(
 		const pcl::PointCloud<pcl::PointXYZRGBNormal>::Ptr & cloud)
 {
 	return removeNaNNormalsFromPointCloudImpl<pcl::PointXYZRGBNormal>(cloud);
+}
+pcl::PointCloud<pcl::PointXYZINormal>::Ptr removeNaNNormalsFromPointCloud(
+		const pcl::PointCloud<pcl::PointXYZINormal>::Ptr & cloud)
+{
+	return removeNaNNormalsFromPointCloudImpl<pcl::PointXYZINormal>(cloud);
 }
 
 

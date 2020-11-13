@@ -25,10 +25,9 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <rtabmap/core/OdometryF2M.h>
 #include "rtabmap/core/OdometryThread.h"
 #include "rtabmap/core/Odometry.h"
-#include "rtabmap/core/OdometryMono.h"
+#include "rtabmap/core/odometry/OdometryMono.h"
 #include "rtabmap/core/OdometryInfo.h"
 #include "rtabmap/core/CameraEvent.h"
 #include "rtabmap/core/OdometryEvent.h"
@@ -108,6 +107,10 @@ void OdometryThread::mainLoop()
 	{
 		_odometry->reset(_resetPose);
 		_resetOdometry = false;
+		UScopeMutex lock(_dataMutex);
+		_dataBuffer.clear();
+		_imuBuffer.clear();
+		_lastImuStamp = 0.0f;
 	}
 
 	SensorData data;
@@ -151,18 +154,13 @@ void OdometryThread::addData(const SensorData & data)
 	bool notify = true;
 	_dataMutex.lock();
 	{
-		if(data.imu().empty())
+		if(!data.imageRaw().empty() || !data.laserScanRaw().isEmpty() || data.imu().empty())
 		{
 			_dataBuffer.push_back(data);
 			while(_dataBufferMaxSize > 0 && _dataBuffer.size() > _dataBufferMaxSize)
 			{
 				UDEBUG("Data buffer is full, the oldest data is removed to add the new one.");
 				_dataBuffer.erase(_dataBuffer.begin());
-				notify = false;
-			}
-			if(notify && _imuEstimatedDelay>0.0 && data.stamp() > (_lastImuStamp+_imuEstimatedDelay))
-			{
-				// Don't notify if IMU data before this image has not been received yet
 				notify = false;
 			}
 		}
@@ -190,19 +188,16 @@ bool OdometryThread::getData(SensorData & data)
 	_dataAdded.acquire();
 	_dataMutex.lock();
 	{
-		if(!_dataBuffer.empty() || !_imuBuffer.empty())
+		if(!_dataBuffer.empty())
 		{
-			if(_dataBuffer.empty() ||
-				(!_dataBuffer.empty() && !_imuBuffer.empty() && _imuBuffer.front().stamp() < _dataBuffer.front().stamp()))
+			while(!_imuBuffer.empty() && _imuBuffer.front().stamp() <= _dataBuffer.front().stamp())
 			{
-				data = _imuBuffer.front();
+				_odometry->process(_imuBuffer.front());
 				_imuBuffer.pop_front();
 			}
-			else
-			{
-				data = _dataBuffer.front();
-				_dataBuffer.pop_front();
-			}
+
+			data = _dataBuffer.front();
+			_dataBuffer.pop_front();
 			dataFilled = true;
 		}
 	}

@@ -156,18 +156,32 @@ public:
 	void rejectLastLoopClosure();
 	void deleteLastLocation();
 	void setOptimizedPoses(const std::map<int, Transform> & poses);
-	void get3DMap(std::map<int, Signature> & signatures,
-			std::map<int, Transform> & poses,
-			std::multimap<int, Link> & constraints,
-			bool optimized,
-			bool global) const;
+	Signature getSignatureCopy(int id, bool images, bool scan, bool userData, bool occupancyGrid) const;
+	RTABMAP_DEPRECATED(
+		void get3DMap(std::map<int, Signature> & signatures,
+				std::map<int, Transform> & poses,
+				std::multimap<int, Link> & constraints,
+				bool optimized,
+				bool global) const, "Use getGraph() instead with withImages=true, withScan=true, withUserData=true and withGrid=true.");
 	void getGraph(std::map<int, Transform> & poses,
 			std::multimap<int, Link> & constraints,
 			bool optimized,
 			bool global,
-			std::map<int, Signature> * signatures = 0);
-	int detectMoreLoopClosures(float clusterRadius = 0.5f, float clusterAngle = M_PI/6.0f, int iterations = 1, const ProgressState * state = 0);
+			std::map<int, Signature> * signatures = 0,
+			bool withImages = false,
+			bool withScan = false,
+			bool withUserData = false,
+			bool withGrid = false) const;
+	int detectMoreLoopClosures(
+			float clusterRadius = 0.5f,
+			float clusterAngle = M_PI/6.0f,
+			int iterations = 1,
+			bool intraSession = true,
+			bool interSession = true,
+			const ProgressState * state = 0);
 	int refineLinks();
+	bool addLink(const Link & link);
+	cv::Mat getInformation(const cv::Mat & covariance) const;
 
 	int getPathStatus() const {return _pathStatus;} // -1=failed 0=idle/executing 1=success
 	void clearPath(int status); // -1=failed 0=idle/executing 1=success
@@ -182,7 +196,7 @@ public:
 	const Transform & getPathTransformToGoal() const {return _pathTransformToGoal;}
 
 	std::map<int, Transform> getForwardWMPoses(int fromId, int maxNearestNeighbors, float radius, int maxDiffID) const;
-	std::map<int, std::map<int, Transform> > getPaths(std::map<int, Transform> poses, const Transform & target, int maxGraphDepth = 0) const;
+	std::map<int, std::map<int, Transform> > getPaths(const std::map<int, Transform> & poses, const Transform & target, int maxGraphDepth = 0) const;
 	void adjustLikelihood(std::map<int, float> & likelihood) const;
 	std::pair<int, float> selectHypothesis(const std::map<int, float> & posterior,
 											const std::map<int, float> & likelihood) const;
@@ -223,6 +237,7 @@ private:
 	unsigned int _maxMemoryAllowed; // signatures count in WM
 	float _loopThr;
 	float _loopRatio;
+	float _maxLoopClosureDistance;
 	bool _verifyLoopClosureHypothesis;
 	unsigned int _maxRetrieved;
 	unsigned int _maxLocalRetrieved;
@@ -248,6 +263,7 @@ private:
 	float _proximityFilteringRadius;
 	bool _proximityRawPosesUsed;
 	float _proximityAngle;
+	bool _proximityOdomGuess;
 	std::string _databasePath;
 	bool _optimizeFromGraphEnd;
 	float _optimizationMaxError;
@@ -259,12 +275,16 @@ private:
 	float _pathLinearVelocity;
 	float _pathAngularVelocity;
 	bool _savedLocalizationIgnored;
+	bool _loopCovLimited;
+	bool _loopGPS;
+	int _maxOdomCacheSize;
 
 	std::pair<int, float> _loopClosureHypothesis;
 	std::pair<int, float> _highestHypothesis;
 	double _lastProcessTime;
 	bool _someNodesHaveBeenTransferred;
 	float _distanceTravelled;
+	bool _optimizeFromGraphEndChanged;
 
 	// Abstract classes containing all loop closure
 	// strategies for a type of signature or configuration.
@@ -290,6 +310,11 @@ private:
 	Transform _mapCorrectionBackup; // used in localization mode when odom is lost
 	Transform _lastLocalizationPose; // Corrected odometry pose. In mapping mode, this corresponds to last pose return by getLocalOptimizedPoses().
 	int _lastLocalizationNodeId; // for localization mode
+	std::map<int, std::pair<cv::Point3d, Transform> > _gpsGeocentricCache;
+	bool _currentSessionHasGPS;
+	std::map<int, Transform> _odomCachePoses;       // used in localization mode to reject loop closures
+	std::multimap<int, Link> _odomCacheConstraints; // used in localization mode to reject loop closures
+	std::map<int, Transform> _odomCacheAddLink; // used in localization mode when adding external link
 
 	// Planning stuff
 	int _pathStatus;

@@ -94,8 +94,9 @@ Transform estimateMotion3DTo2D(
 	imagePoints.resize(oi);
 	matches.resize(oi);
 
-	UDEBUG("words3A=%d words2B=%d matches=%d words3B=%d guess=%s",
-			(int)words3A.size(), (int)words2B.size(), (int)matches.size(), (int)words3B.size(), guess.prettyPrint().c_str());
+	UDEBUG("words3A=%d words2B=%d matches=%d words3B=%d guess=%s reprojError=%f iterations=%d",
+			(int)words3A.size(), (int)words2B.size(), (int)matches.size(), (int)words3B.size(),
+			guess.prettyPrint().c_str(), reprojError, iterations);
 
 	if((int)matches.size() >= minInliers)
 	{
@@ -175,6 +176,11 @@ Transform estimateMotion3DTo2D(
 				else
 				{
 					UWARN("Not enough close points to compute covariance!");
+				}
+
+				if(float(oi) / float(inliers.size()) < 0.2f)
+				{
+					UWARN("A very low number of inliers have valid depth (%d/%d), the transform returned may be wrong!", oi, (int)inliers.size());
 				}
 			}
 			else if(covariance)

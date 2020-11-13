@@ -79,7 +79,8 @@ Scene::Scene() :
 		graphVisible_(true),
 		gridVisible_(true),
 		traceVisible_(true),
-		color_camera_to_display_rotation_(ROTATION_0),
+		frustumVisible_(true),
+		color_camera_to_display_rotation_(rtabmap::ROTATION_0),
 		currentPose_(0),
 		graph_shader_program_(0),
 		blending_(true),
@@ -102,12 +103,13 @@ Scene::Scene() :
 {
 	gesture_camera_ = new tango_gl::GestureCamera();
 	gesture_camera_->SetCameraType(
-	      tango_gl::GestureCamera::kFirstPerson);
+	      tango_gl::GestureCamera::kThirdPersonFollow);
 }
 
 Scene::~Scene() {
 	DeleteResources();
 	delete gesture_camera_;
+	delete currentPose_;
 }
 
 //Should only be called in OpenGL thread!
@@ -126,7 +128,6 @@ void Scene::InitGLContent()
 	trace_ = new tango_gl::Trace();
 	grid_ = new tango_gl::Grid();
 	box_ = new BoundingBoxDrawable();
-	currentPose_ = new rtabmap::Transform();
 
 
 	axis_->SetScale(glm::vec3(0.5f,0.5f,0.5f));
@@ -158,7 +159,6 @@ void Scene::DeleteResources() {
 		delete frustum_;
 		delete trace_;
 		delete grid_;
-		delete currentPose_;
 		delete box_;
 	}
 
@@ -188,6 +188,10 @@ void Scene::clear()
 	{
 		delete iter->second;
 	}
+	for(std::map<int, tango_gl::Axis*>::iterator iter=markers_.begin(); iter!=markers_.end(); ++iter)
+	{
+		delete iter->second;
+	}
 	if(trace_)
 	{
 		trace_->ClearVertexArray();
@@ -198,6 +202,7 @@ void Scene::clear()
 		graph_ = 0;
 	}
 	pointClouds_.clear();
+	markers_.clear();
 	if(grid_)
 	{
 		grid_->SetPosition(kHeightOffset);
@@ -362,6 +367,10 @@ bool intersectFrustumAABB(
 int Scene::Render() {
 	UASSERT(gesture_camera_ != 0);
 
+	if(currentPose_ == 0)
+	{
+		currentPose_ = new rtabmap::Transform(0,0,0,0,0,-M_PI/2.0f);
+	}
 	glm::vec3 position(currentPose_->x(), currentPose_->y(), currentPose_->z());
 	Eigen::Quaternionf quat = currentPose_->getQuaternionf();
 	glm::quat rotation(quat.w(), quat.x(), quat.y(), quat.z());
@@ -488,7 +497,7 @@ int Scene::Render() {
 
 	if(!currentPose_->isNull())
 	{
-		if (gesture_camera_->GetCameraType() != tango_gl::GestureCamera::kFirstPerson)
+		if (frustumVisible_ && gesture_camera_->GetCameraType() != tango_gl::GestureCamera::kFirstPerson)
 		{
 			frustum_->SetPosition(position);
 			frustum_->SetRotation(rotation);
@@ -497,8 +506,13 @@ int Scene::Render() {
 			frustum_->SetScale(kFrustumScale);
 			frustum_->Render(projectionMatrix, viewMatrix);
 
-			axis_->SetPosition(position);
-			axis_->SetRotation(rotation);
+			rtabmap::Transform cameraFrame = *currentPose_*rtabmap::optical_T_opengl*rtabmap::CameraMobile::opticalRotationInv;
+			glm::vec3 positionCamera(cameraFrame.x(), cameraFrame.y(), cameraFrame.z());
+			Eigen::Quaternionf quatCamera = cameraFrame.getQuaternionf();
+			glm::quat rotationCamera(quatCamera.w(), quatCamera.x(), quatCamera.y(), quatCamera.z());
+
+			axis_->SetPosition(positionCamera);
+			axis_->SetRotation(rotationCamera);
 			axis_->Render(projectionMatrix, viewMatrix);
 		}
 
@@ -507,11 +521,11 @@ int Scene::Render() {
 		{
 			trace_->Render(projectionMatrix, viewMatrix);
 		}
+	}
 
-		if(gridVisible_)
-		{
-			grid_->Render(projectionMatrix, viewMatrix);
-		}
+	if(gridVisible_)
+	{
+		grid_->Render(projectionMatrix, viewMatrix);
 	}
 
 	if(graphVisible_ && graph_)
@@ -551,6 +565,12 @@ int Scene::Render() {
 		glDepthMask(GL_TRUE);
 	}
 
+	//draw markers on foreground
+	for(std::map<int, tango_gl::Axis*>::const_iterator iter=markers_.begin(); iter!=markers_.end(); ++iter)
+	{
+		iter->second->Render(projectionMatrix, viewMatrix);
+	}
+
 	return (int)cloudsToDraw.size();
 }
 
@@ -560,8 +580,11 @@ void Scene::SetCameraType(tango_gl::GestureCamera::CameraType camera_type) {
 
 void Scene::SetCameraPose(const rtabmap::Transform & pose)
 {
-	UASSERT(currentPose_ != 0);
 	UASSERT(!pose.isNull());
+	if(currentPose_ ==0)
+	{
+		currentPose_ = new rtabmap::Transform(0,0,0,0,0,-M_PI/2.0f);
+	}
 	*currentPose_ = pose;
 }
 
@@ -589,7 +612,7 @@ rtabmap::Transform Scene::GetOpenGLCameraPose(float * fov) const
 	{
 		*fov = gesture_camera_->getFOV();
 	}
-	return glmToTransform(gesture_camera_->GetTransformationMatrix());
+	return rtabmap::glmToTransform(gesture_camera_->GetTransformationMatrix());
 }
 
 void Scene::OnTouchEvent(int touch_count,
@@ -647,7 +670,59 @@ void Scene::setTraceVisible(bool visible)
 	traceVisible_ = visible;
 }
 
+void Scene::setFrustumVisible(bool visible)
+{
+	frustumVisible_ = visible;
+}
+
 //Should only be called in OpenGL thread!
+void Scene::addMarker(
+		int id,
+		const rtabmap::Transform & pose)
+{
+	LOGI("add marker %d", id);
+	std::map<int, tango_gl::Axis*>::iterator iter=markers_.find(id);
+	if(iter == markers_.end())
+	{
+		//create
+		tango_gl::Axis * drawable = new tango_gl::Axis();
+		drawable->SetScale(glm::vec3(0.05f,0.05f,0.05f));
+		drawable->SetLineWidth(5);
+		markers_.insert(std::make_pair(id, drawable));
+	}
+	setMarkerPose(id, pose);
+}
+void Scene::setMarkerPose(int id, const rtabmap::Transform & pose)
+{
+	UASSERT(!pose.isNull());
+	std::map<int, tango_gl::Axis*>::iterator iter=markers_.find(id);
+	if(iter != markers_.end())
+	{
+		glm::vec3 position(pose.x(), pose.y(), pose.z());
+		Eigen::Quaternionf quat = pose.getQuaternionf();
+		glm::quat rotation(quat.w(), quat.x(), quat.y(), quat.z());
+		iter->second->SetPosition(position);
+		iter->second->SetRotation(rotation);
+	}
+}
+bool Scene::hasMarker(int id) const
+{
+	return markers_.find(id) != markers_.end();
+}
+void Scene::removeMarker(int id)
+{
+	std::map<int, tango_gl::Axis*>::iterator iter=markers_.find(id);
+	if(iter != markers_.end())
+	{
+		delete iter->second;
+		markers_.erase(iter);
+	}
+}
+std::set<int> Scene::getAddedMarkers() const
+{
+	return uKeysSet(markers_);
+}
+
 void Scene::addCloud(
 		int id,
 		const pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud,
@@ -670,7 +745,7 @@ void Scene::addCloud(
 
 void Scene::addMesh(
 		int id,
-		const Mesh & mesh,
+		const rtabmap::Mesh & mesh,
 		const rtabmap::Transform & pose,
 		bool createWireframe)
 {
@@ -789,7 +864,7 @@ void Scene::updateCloudPolygons(int id, const std::vector<pcl::Vertices> & polyg
 	}
 }
 
-void Scene::updateMesh(int id, const Mesh & mesh)
+void Scene::updateMesh(int id, const rtabmap::Mesh & mesh)
 {
 	std::map<int, PointCloudDrawable*>::iterator iter=pointClouds_.find(id);
 	if(iter != pointClouds_.end())

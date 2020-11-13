@@ -1,5 +1,13 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
     
+    <ListPreference 
+            android:key="@string/pref_key_camera_driver"
+    		android:title="@string/pref_title_camera_driver"
+    		android:summary="@string/pref_summary_camera_driver"
+   			android:entries="@array/pref_camera_driver_keys"
+   			android:entryValues="@array/pref_camera_driver_values"
+   			android:defaultValue="@string/pref_default_camera_driver"/>
+    
     <PreferenceCategory
         android:title="@string/pref_title_rendering">
         <ListPreference 
@@ -78,7 +86,7 @@
             android:title="@string/pref_title_mapping_sub"
             android:summary="@string/pref_summary_mapping"
             android:persistent="false">
-        
+                    
 		    <com.introlab.rtabmap.CustomSwitchPreference
 	            android:key="@string/pref_key_append"
 	            android:title="@string/pref_title_append"
@@ -191,6 +199,20 @@
 		    		android:title="@string/pref_title_optimize_end"
 		    		android:summary="@string/pref_summary_optimize_end"
 		   			android:defaultValue="@string/pref_default_optimize_end"/>
+		   		<ListPreference 
+		            android:key="@string/pref_key_marker_detection"
+		    		android:title="@string/pref_title_marker_detection"
+		    		android:summary="@string/pref_summary_marker_detection"
+		   			android:entries="@array/pref_marker_detection_keys"
+		   			android:entryValues="@array/pref_marker_detection_values"
+		   			android:defaultValue="@string/pref_default_marker_detection"/>
+		   		<ListPreference 
+		            android:key="@string/pref_key_marker_detection_depth_error"
+		    		android:title="@string/pref_title_marker_detection_depth_error"
+		    		android:summary="@string/pref_summary_marker_detection_depth_error"
+		   			android:entries="@array/pref_marker_detection_depth_error_keys"
+		   			android:entryValues="@array/pref_marker_detection_depth_error_values"
+		   			android:defaultValue="@string/pref_default_marker_detection_depth_error"/>
 		    </PreferenceCategory>
 	        <PreferenceCategory
 	        	android:title="@string/pref_title_mapping_database">
@@ -209,6 +231,11 @@
 		            android:title="@string/pref_title_gps_saved"
 		            android:summary="@string/pref_summary_gps_saved"
 		            android:defaultValue="@string/pref_default_gps_saved"/>
+		        <com.introlab.rtabmap.CustomSwitchPreference
+		            android:key="@string/pref_key_env_sensors_saved"
+		            android:title="@string/pref_title_env_sensors_saved"
+		            android:summary="@string/pref_summary_env_sensors_saved"
+		            android:defaultValue="@string/pref_default_env_sensors_saved"/>
 		        <com.introlab.rtabmap.CustomSwitchPreference
 		            android:key="@string/pref_key_db_in_memory"
 		            android:title="@string/pref_title_db_in_memory"
